@@ -4,6 +4,7 @@ from discord import app_commands
 from discord.ui import View, Button
 from typing import Optional, List, Union
 import os
+import sys
 from datetime import datetime, timezone, timedelta, time
 import json
 
@@ -196,7 +197,6 @@ async def run_daily_test(channel):
 
 @bot.event
 async def on_ready():
-    print("--- ログインイベントを検知しました ---") # ← ここに追加！
     load_config()
     await bot.tree.sync()
     
@@ -209,7 +209,6 @@ async def on_ready():
         daily_ping.start()
     
     print(f"ログイン成功: {bot.user}")
-
 
 
 @bot.event
@@ -648,6 +647,20 @@ async def ping_command(interaction: discord.Interaction):
         color=discord.Color.green() if latency < 200 else discord.Color.orange()
     )
     await interaction.response.send_message(embed=embed)
+
+
+# ====== スラッシュコマンド /restart ======
+@bot.tree.command(name="restart", description="ボットを再起動（オーナーのみ）")
+async def restart_command(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("このコマンドはオーナーのみが使用できます。", ephemeral=True)
+        return
+    
+    await interaction.response.send_message("🔄 ボットを再起動します...", ephemeral=True)
+    print(f"🔄 再起動要求 by {interaction.user}")
+    
+    await bot.close()
+    sys.exit(0)
 
 
 # ====== スラッシュコマンド /test ======
