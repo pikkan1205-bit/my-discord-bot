@@ -209,6 +209,20 @@ async def on_ready():
         daily_ping.start()
     
     print(f"ログイン成功: {bot.user}")
+    
+    # 起動完了メッセージをオーナーにDM送信
+    try:
+        owner = await bot.fetch_user(OWNER_ID)
+        current_time = datetime.now(JST).strftime("%Y年%m月%d日 %H:%M:%S")
+        embed = discord.Embed(
+            title="✅ 起動完了",
+            description=f"ボットが正常に起動しました。",
+            color=discord.Color.green()
+        )
+        embed.set_footer(text=f"起動時刻: {current_time}")
+        await owner.send(embed=embed)
+    except Exception as e:
+        print(f"❌ 起動メッセージ送信失敗: {e}")
 
 
 @bot.event
