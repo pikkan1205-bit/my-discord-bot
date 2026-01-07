@@ -214,6 +214,7 @@ async def run_daily_test(channel):
 
 @bot.event
 async def on_ready():
+    print("--- ログインイベントを検知しました ---") # ← ここに追加！
     load_config()
     await bot.tree.sync()
     
@@ -226,6 +227,7 @@ async def on_ready():
         daily_ping.start()
     
     print(f"ログイン成功: {bot.user}")
+
 
 
 @bot.event
