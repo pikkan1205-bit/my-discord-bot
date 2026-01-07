@@ -1087,7 +1087,6 @@ async def on_error(event: str, *args, **kwargs):
 
 # ====== Bot起動 ======
 if __name__ == "__main__":
-    keep_alive()  # ← これを必ず bot.run の前に入れる
 
     # 環境変数名は Render の設定と合わせます（ここでは DISCORD_BOT_TOKEN）
     token = os.getenv("DISCORD_BOT_TOKEN")
