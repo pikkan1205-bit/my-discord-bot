@@ -5,8 +5,10 @@ from discord.ui import View, Button
 from typing import Optional, List, Union
 import os
 import sys
+import re
 from datetime import datetime, timezone, timedelta, time
 import json
+from googleapiclient.discovery import build
 
 # ====== Intents 設定 ======
 intents = discord.Intents.default()
@@ -15,6 +17,19 @@ intents.voice_states = True
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+# ====== Google検索API設定 ======
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
+GOOGLE_CSE_ID = os.environ.get("GOOGLE_CSE_ID", "")
+
+# Google Custom Search サービス初期化
+google_service = None
+if GOOGLE_API_KEY and GOOGLE_CSE_ID:
+    try:
+        google_service = build("customsearch", "v1", developerKey=GOOGLE_API_KEY)
+        print("✅ Google検索API初期化完了")
+    except Exception as e:
+        print(f"❌ Google検索API初期化失敗: {e}")
 
 # ====== 設定ここだけ書き換える ======
 OWNER_ID = 1163117069173272576  # あなたのID
@@ -254,6 +269,65 @@ async def on_message(message: discord.Message):
             print(f"📩 DM転送完了: {message.author.name} [{current_time}]")
         except Exception as e:
             print(f"❌ DM転送失敗: {e}")
+    
+    # 「〇〇と検索して」パターンに反応
+    if "と検索して" in message.content:
+        await handle_search_request(message)
+
+
+async def handle_search_request(message: discord.Message):
+    """「〇〇と検索して」に反応してGoogle検索を実行"""
+    global google_service
+    
+    if not google_service:
+        await message.reply("❌ Google検索APIが設定されていません。")
+        return
+    
+    # 「〇〇と検索して」のパターンから検索ワードを抽出
+    match = re.search(r"(.+?)と検索して", message.content)
+    if not match:
+        return
+    
+    query = match.group(1).strip()
+    if not query:
+        await message.reply("❌ 検索ワードが見つかりませんでした。")
+        return
+    
+    try:
+        async with message.channel.typing():
+            result = google_service.cse().list(
+                q=query,
+                cx=GOOGLE_CSE_ID,
+                num=5
+            ).execute()
+            
+            if 'items' not in result:
+                await message.reply(f"🔍 「{query}」の検索結果が見つかりませんでした。")
+                return
+            
+            embed = discord.Embed(
+                title=f"🔍 「{query}」の検索結果",
+                color=discord.Color.blue()
+            )
+            
+            for i, item in enumerate(result['items'][:5], 1):
+                title = item['title'][:100]
+                link = item['link']
+                snippet = item.get('snippet', 'No description')[:150]
+                
+                embed.add_field(
+                    name=f"{i}. {title}",
+                    value=f"{snippet}...\n[リンク]({link})",
+                    inline=False
+                )
+            
+            embed.set_footer(text=f"検索者: {message.author.name}")
+            await message.reply(embed=embed)
+            print(f"🔍 検索実行: {query} by {message.author.name}")
+            
+    except Exception as e:
+        await message.reply(f"❌ 検索エラー: {e}")
+        print(f"❌ 検索エラー: {e}")
 
 
 # ====== オートコンプリート関数 ======
