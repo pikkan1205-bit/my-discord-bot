@@ -361,6 +361,66 @@ async def on_message(message: discord.Message):
     # 「〇〇と検索して」パターンに反応（管理者モード外でも動作）
     if "と検索して" in message.content:
         await handle_search_request(message)
+    
+    # 「チャットを削除して」コマンド（管理者モード外でも動作、オーナーのみ）
+    if message.author.id == OWNER_ID:
+        if ("チャット" in normalized or "メッセージ" in normalized) and "削除" in normalized:
+            if "監視" not in normalized:  # 監視対象削除と区別
+                match = re.search(r"(\d+)件", content)
+                limit = int(match.group(1)) if match else 100
+                
+                if isinstance(message.channel, discord.TextChannel):
+                    await message.channel.purge(limit=limit + 1)
+                    await message.channel.send("お掃除完了！綺麗になったね！", delete_after=5)
+                    return
+
+
+def normalize_synonyms(text: str) -> str:
+    """類義語を統一形に正規化"""
+    synonyms = {
+        # autoping関連
+        "オートピング": "autoping", "おーとぴんぐ": "autoping", "自動ピング": "autoping",
+        "自動ping": "autoping", "オートping": "autoping", "自動通知": "autoping",
+        # DM関連
+        "ダイレクトメッセージ": "dm", "ディーエム": "dm", "プライベートメッセージ": "dm",
+        # 出禁関連
+        "ブロック": "出禁", "ban": "出禁", "バン": "出禁", "追放": "出禁", "キック": "出禁",
+        "締め出し": "出禁", "入室禁止": "出禁", "参加禁止": "出禁",
+        # 管理者関連
+        "admin": "管理者", "アドミン": "管理者", "モデレーター": "管理者", "mod": "管理者",
+        # 追加関連
+        "入れて": "追加", "登録": "追加", "加えて": "追加", "つけて": "追加", "付けて": "追加",
+        "いれて": "追加", "加入": "追加", "参加": "追加",
+        # 削除関連
+        "外して": "削除", "消して": "削除", "除外": "削除", "取り消し": "削除", "はずして": "削除",
+        "抜いて": "削除", "除いて": "削除", "取って": "削除", "とって": "削除",
+        # 解除関連
+        "外す": "解除", "やめて": "解除", "取り消して": "解除", "取消": "解除", "キャンセル": "解除",
+        # オン関連
+        "有効": "オン", "つけて": "オン", "入れて": "オン", "開始": "オン", "スタート": "オン",
+        "起動": "オン", "enable": "オン", "on": "オン",
+        # オフ関連
+        "無効": "オフ", "止めて": "オフ", "停止": "オフ", "ストップ": "オフ", "終了": "オフ",
+        "disable": "オフ", "off": "オフ",
+        # 設定関連
+        "セット": "設定", "変更": "設定", "指定": "設定", "切り替え": "設定",
+        # チャット関連
+        "メッセージ": "チャット", "発言": "チャット", "ログ": "チャット", "履歴": "チャット",
+        "会話": "チャット", "投稿": "チャット",
+        # 監視関連
+        "ウォッチ": "監視", "watch": "監視", "対象": "監視", "見張り": "監視", "チェック対象": "監視",
+        # VC関連
+        "ボイスチャンネル": "vc", "ボイチャ": "vc", "通話": "vc", "ボイス": "vc", "音声チャンネル": "vc",
+    }
+    result = text.lower()
+    for old, new in synonyms.items():
+        result = result.replace(old.lower(), new.lower())
+    return result
+
+
+def has_any(text: str, keywords: list) -> bool:
+    """キーワードのいずれかが含まれるか"""
+    return any(k in text for k in keywords)
 
 
 async def handle_admin_mode_command(message: discord.Message) -> bool:
@@ -372,11 +432,23 @@ async def handle_admin_mode_command(message: discord.Message) -> bool:
     content_no_mentions = re.sub(r"<@!?\d+>", "", content)
     content_no_mentions = re.sub(r"<#\d+>", "", content_no_mentions)
     normalized = normalize_text(content_no_mentions)
+    # 類義語を統一
+    unified = normalize_synonyms(normalized)
+    
+    # 追加系キーワード
+    ADD_KEYWORDS = ["追加", "入れて", "登録", "加えて", "つけて", "付けて", "いれて", "加入", "参加", "にして", "として"]
+    # 削除・解除系キーワード
+    REMOVE_KEYWORDS = ["削除", "解除", "外して", "消して", "除外", "取り消し", "はずして", "抜いて", "除いて", "取って", "とって", "やめて", "外す", "キャンセル", "なくして"]
+    # オン系キーワード
+    ON_KEYWORDS = ["オン", "有効", "つけて", "入れて", "開始", "スタート", "起動", "enable", "on", "始めて"]
+    # オフ系キーワード
+    OFF_KEYWORDS = ["オフ", "無効", "止めて", "停止", "ストップ", "終了", "disable", "off", "やめて", "切って"]
     
     try:
-        # @ユーザー名を管理者に追加して（様々な言い回しに対応）
-        if ("管理者" in normalized and "追加" in normalized) or any(k in normalized for k in ["adminに追加", "admin追加"]):
-            if "削除" not in normalized and "解除" not in normalized:
+        # ===== 管理者追加 =====
+        admin_add_keywords = ["管理者", "admin", "アドミン", "モデレーター", "mod", "権限"]
+        if has_any(unified, admin_add_keywords) and has_any(unified, ADD_KEYWORDS):
+            if not has_any(unified, REMOVE_KEYWORDS):
                 if message.mentions:
                     user = message.mentions[0]
                     ADMIN_IDS.add(user.id)
@@ -384,8 +456,8 @@ async def handle_admin_mode_command(message: discord.Message) -> bool:
                     await message.reply(f"{user.mention} を管理者に追加したよ！")
                     return True
         
-        # @ユーザー名を管理者から削除して（様々な言い回しに対応）
-        if ("管理者" in normalized and ("削除" in normalized or "解除" in normalized)) or any(k in normalized for k in ["adminから削除", "admin削除"]):
+        # ===== 管理者削除 =====
+        if has_any(unified, admin_add_keywords) and has_any(unified, REMOVE_KEYWORDS):
             if message.mentions:
                 user = message.mentions[0]
                 ADMIN_IDS.discard(user.id)
@@ -393,9 +465,17 @@ async def handle_admin_mode_command(message: discord.Message) -> bool:
                 await message.reply(f"{user.mention} を管理者から削除したよ！")
                 return True
         
-        # autopingを#チャンネル名に設定して（様々な言い回しに対応）
-        if (("autoping" in normalized or "オートピング" in normalized) and ("設定" in normalized or "有効" in normalized or "オン" in normalized)):
-            if "無効" not in normalized and "オフ" not in normalized:
+        # ===== autoping設定 =====
+        autoping_keywords = ["autoping", "オートピング", "おーとぴんぐ", "自動ピング", "自動ping", "オートping", "自動通知", "ping通知"]
+        if has_any(unified, autoping_keywords):
+            # オフにする
+            if has_any(unified, OFF_KEYWORDS):
+                AUTO_PING_CHANNEL_ID = 0
+                save_config()
+                await message.reply("オートピングを無効化したよ！")
+                return True
+            # オンにする（チャンネル指定）
+            if has_any(unified, ON_KEYWORDS + ["設定", "セット", "変更", "指定"]):
                 if message.channel_mentions:
                     channel = message.channel_mentions[0]
                     AUTO_PING_CHANNEL_ID = channel.id
@@ -403,15 +483,9 @@ async def handle_admin_mode_command(message: discord.Message) -> bool:
                     await message.reply("オートピングを設定したよ！")
                     return True
         
-        # autopingを無効化して
-        if ("autoping" in normalized or "オートピング" in normalized) and ("無効" in normalized or "オフ" in normalized):
-            AUTO_PING_CHANNEL_ID = 0
-            save_config()
-            await message.reply("オートピングを無効化したよ！")
-            return True
-        
-        # @ユーザー名をボイスチャット出禁にして（様々な言い回しに対応）
-        if ("出禁" in normalized or "ブロック" in normalized) and "解除" not in normalized:
+        # ===== VC出禁追加 =====
+        block_keywords = ["出禁", "ブロック", "ban", "バン", "追放", "キック", "締め出し", "入室禁止", "参加禁止", "vcブロック", "vcban"]
+        if has_any(unified, block_keywords) and not has_any(unified, REMOVE_KEYWORDS):
             if message.mentions:
                 user = message.mentions[0]
                 BLOCKED_USERS.add(user.id)
@@ -419,8 +493,8 @@ async def handle_admin_mode_command(message: discord.Message) -> bool:
                 await message.reply(f"{user.mention} を出禁にしたよ！")
                 return True
         
-        # @ユーザー名をボイスチャット出禁解除して
-        if ("出禁" in normalized or "ブロック" in normalized) and "解除" in normalized:
+        # ===== VC出禁解除 =====
+        if has_any(unified, block_keywords) and has_any(unified, REMOVE_KEYWORDS):
             if message.mentions:
                 user = message.mentions[0]
                 BLOCKED_USERS.discard(user.id)
@@ -428,18 +502,20 @@ async def handle_admin_mode_command(message: discord.Message) -> bool:
                 await message.reply(f"{user.mention} を出禁から解除したよ！")
                 return True
         
-        # チャンネルid○○を監視対象に追加して（様々な言い回しに対応）
-        if ("監視" in normalized and "追加" in normalized) and "削除" not in normalized:
-            match = re.search(r"(\d{17,20})", content)
-            if match:
-                vc_id = int(match.group(1))
-                TARGET_VC_IDS.add(vc_id)
-                save_config()
-                await message.reply(f"チャンネルID {vc_id} を監視対象に追加したよ！")
-                return True
+        # ===== 監視対象追加 =====
+        watch_keywords = ["監視", "ウォッチ", "watch", "対象", "見張り", "チェック対象", "vc対象", "チャンネル対象"]
+        if has_any(unified, watch_keywords) and has_any(unified, ADD_KEYWORDS):
+            if not has_any(unified, REMOVE_KEYWORDS):
+                match = re.search(r"(\d{17,20})", content)
+                if match:
+                    vc_id = int(match.group(1))
+                    TARGET_VC_IDS.add(vc_id)
+                    save_config()
+                    await message.reply(f"チャンネルID {vc_id} を監視対象に追加したよ！")
+                    return True
         
-        # チャンネルid○○を監視対象から削除して
-        if ("監視" in normalized and "削除" in normalized):
+        # ===== 監視対象削除 =====
+        if has_any(unified, watch_keywords) and has_any(unified, REMOVE_KEYWORDS):
             match = re.search(r"(\d{17,20})", content)
             if match:
                 vc_id = int(match.group(1))
@@ -448,22 +524,25 @@ async def handle_admin_mode_command(message: discord.Message) -> bool:
                 await message.reply(f"チャンネルID {vc_id} を監視対象から削除したよ！")
                 return True
         
-        # チャットを○件削除して / チャットを削除して（監視削除とは別）
-        if (("チャット" in normalized or "メッセージ" in normalized) and "削除" in normalized) or ("削除して" in normalized and "件" in normalized):
-            if "監視" not in normalized:  # 監視対象削除と区別
+        # ===== チャット削除 =====
+        chat_keywords = ["チャット", "メッセージ", "発言", "ログ", "履歴", "会話", "投稿", "掃除", "クリア", "clear"]
+        delete_keywords = ["削除", "消して", "掃除", "クリア", "clear", "消去", "片付け", "きれいに", "綺麗に"]
+        if has_any(unified, chat_keywords) and has_any(unified, delete_keywords):
+            if not has_any(unified, watch_keywords):  # 監視対象削除と区別
                 match = re.search(r"(\d+)件", content)
                 limit = int(match.group(1)) if match else 100
                 
                 if isinstance(message.channel, discord.TextChannel):
-                    deleted = await message.channel.purge(limit=limit + 1)
+                    await message.channel.purge(limit=limit + 1)
                     await message.channel.send("お掃除完了！綺麗になったね！", delete_after=5)
                     return True
         
-        # @ユーザー名に○○とdm送信して
-        if any(k in normalized for k in ["dm送信", "dmを送信", "dm送って"]):
+        # ===== DM送信 =====
+        dm_keywords = ["dm", "ダイレクトメッセージ", "ディーエム", "プライベートメッセージ", "個人メッセージ"]
+        send_keywords = ["送信", "送って", "送る", "伝えて", "伝える", "届けて", "届ける"]
+        if has_any(unified, dm_keywords) and has_any(unified, send_keywords):
             if message.mentions:
                 user = message.mentions[0]
-                # メッセージ内容を抽出
                 dm_match = re.search(r"(?:に|へ)(.+?)(?:と|って)(?:dm|DM)", content, re.IGNORECASE)
                 if not dm_match:
                     dm_match = re.search(r"(?:dm|DM)(?:送信|送って)(.+)", content, re.IGNORECASE)
@@ -472,7 +551,6 @@ async def handle_admin_mode_command(message: discord.Message) -> bool:
                 if dm_match:
                     dm_content = dm_match.group(1).strip()
                 
-                # 添付ファイルがある場合
                 files = [await att.to_file() for att in message.attachments] if message.attachments else []
                 
                 try:
@@ -482,8 +560,9 @@ async def handle_admin_mode_command(message: discord.Message) -> bool:
                     await message.reply("DMの送信に失敗したよ...")
                 return True
         
-        # ヘルプを表示して / 困った
-        if any(k in normalized for k in ["ヘルプ", "困った", "help"]):
+        # ===== ヘルプ =====
+        help_keywords = ["ヘルプ", "困った", "help", "使い方", "わからない", "教えて", "どうすれば", "何ができる", "コマンド一覧", "機能一覧"]
+        if has_any(unified, help_keywords):
             await message.reply("ヘルプを表示するね！")
             # ヘルプ内容を表示
             embed = discord.Embed(title="📖 ヘルプ", description="管理者モードで使えるコマンド一覧", color=discord.Color.blue())
@@ -495,79 +574,84 @@ async def handle_admin_mode_command(message: discord.Message) -> bool:
             await message.channel.send(embed=embed)
             return True
         
-        # リストを表示して / 現在の設定を確認したい
-        if any(k in normalized for k in ["リストを表示", "設定を確認", "リスト表示"]):
-            await message.reply("リストを表示するね！")
-            
-            # ブロックユーザーリスト
-            if BLOCKED_USERS:
-                user_list = []
-                for uid in BLOCKED_USERS:
-                    try:
-                        user = await bot.fetch_user(uid)
-                        user_list.append(f"• {user.name} ({uid})")
-                    except:
-                        user_list.append(f"• 不明なユーザー ({uid})")
-                embed1 = discord.Embed(title="🚫 対象ユーザーリスト", description="\n".join(user_list), color=discord.Color.red())
-            else:
-                embed1 = discord.Embed(title="🚫 対象ユーザーリスト", description="登録なし", color=discord.Color.red())
-            await message.channel.send(embed=embed1)
-            
-            # 管理者リスト
-            if ADMIN_IDS:
-                admin_list = []
-                for uid in ADMIN_IDS:
-                    try:
-                        user = await bot.fetch_user(uid)
-                        admin_list.append(f"• {user.name} ({uid})")
-                    except:
-                        admin_list.append(f"• 不明なユーザー ({uid})")
-                embed2 = discord.Embed(title="👑 管理者リスト", description="\n".join(admin_list), color=discord.Color.gold())
-            else:
-                embed2 = discord.Embed(title="👑 管理者リスト", description="登録なし", color=discord.Color.gold())
-            await message.channel.send(embed=embed2)
-            return True
+        # ===== リスト表示 =====
+        list_keywords = ["リスト", "一覧", "設定", "確認", "状態", "ステータス", "status", "list", "見せて", "表示", "誰が", "何が", "登録されてる", "今の"]
+        if has_any(unified, list_keywords) and not has_any(unified, delete_keywords + ADD_KEYWORDS):
+            if has_any(unified, ["表示", "見せて", "確認", "教えて", "見たい", "知りたい"]) or ("リスト" in unified):
+                await message.reply("リストを表示するね！")
+                
+                if BLOCKED_USERS:
+                    user_list = []
+                    for uid in BLOCKED_USERS:
+                        try:
+                            user = await bot.fetch_user(uid)
+                            user_list.append(f"• {user.name} ({uid})")
+                        except:
+                            user_list.append(f"• 不明なユーザー ({uid})")
+                    embed1 = discord.Embed(title="🚫 対象ユーザーリスト", description="\n".join(user_list), color=discord.Color.red())
+                else:
+                    embed1 = discord.Embed(title="🚫 対象ユーザーリスト", description="登録なし", color=discord.Color.red())
+                await message.channel.send(embed=embed1)
+                
+                if ADMIN_IDS:
+                    admin_list = []
+                    for uid in ADMIN_IDS:
+                        try:
+                            user = await bot.fetch_user(uid)
+                            admin_list.append(f"• {user.name} ({uid})")
+                        except:
+                            admin_list.append(f"• 不明なユーザー ({uid})")
+                    embed2 = discord.Embed(title="👑 管理者リスト", description="\n".join(admin_list), color=discord.Color.gold())
+                else:
+                    embed2 = discord.Embed(title="👑 管理者リスト", description="登録なし", color=discord.Color.gold())
+                await message.channel.send(embed=embed2)
+                return True
         
-        # pingを表示して
-        if any(k in normalized for k in ["pingを表示", "ping表示", "ピンを表示"]):
+        # ===== ping表示 =====
+        ping_keywords = ["ping", "ピング", "ピン", "遅延", "レイテンシ", "latency", "応答速度", "反応速度", "速度"]
+        if has_any(unified, ping_keywords):
             await message.reply("pingを表示するね！")
             latency = round(bot.latency * 1000)
             embed = discord.Embed(title="🏓 Pong!", description=f"レイテンシ: **{latency}ms**", color=discord.Color.green())
             await message.channel.send(embed=embed)
             return True
         
-        # 再起動して
-        if any(k in normalized for k in ["再起動", "リスタート", "restart"]):
+        # ===== 再起動 =====
+        restart_keywords = ["再起動", "リスタート", "restart", "reboot", "リブート", "再開", "起動し直し", "立ち上げ直し", "もう一回起動", "再立ち上げ"]
+        if has_any(unified, restart_keywords):
             await message.reply("再起動するね！")
             import asyncio
             await asyncio.sleep(3)
             await bot.close()
             sys.exit(0)
         
-        # ○○と発言して
-        if any(k in normalized for k in ["と発言して", "って言って", "と言って"]):
-            match = re.search(r"(.+?)(?:と発言して|って言って|と言って)", content)
+        # ===== 発言 =====
+        say_keywords = ["発言", "言って", "しゃべって", "喋って", "話して", "送って", "投稿", "つぶやいて", "呟いて", "say"]
+        if has_any(unified, say_keywords):
+            match = re.search(r"(.+?)(?:と発言|って言|と言|をしゃべ|を喋|を話|と送|を投稿|とつぶや|と呟|とsay)", content, re.IGNORECASE)
             if match:
                 say_content = match.group(1).strip()
-                await message.channel.send(say_content)
+                if say_content:
+                    await message.channel.send(say_content)
+                    return True
+        
+        # ===== 監視機能オン/オフ =====
+        monitor_keywords = ["監視", "ウォッチ", "watch", "ブロック機能", "出禁機能", "vc機能", "自動切断", "自動キック"]
+        if has_any(unified, monitor_keywords) and has_any(unified, ["機能", "システム", "モード"]):
+            if has_any(unified, ON_KEYWORDS):
+                vc_block_enabled = True
+                save_config()
+                await message.reply("監視機能をオンにしたよ！")
+                return True
+            if has_any(unified, OFF_KEYWORDS):
+                vc_block_enabled = False
+                save_config()
+                await message.reply("監視機能をオフにしたよ！")
                 return True
         
-        # 監視機能をオンにして
-        if any(k in normalized for k in ["監視機能をオン", "監視をオン", "監視機能を有効"]):
-            vc_block_enabled = True
-            save_config()
-            await message.reply("監視機能をオンにしたよ！")
-            return True
-        
-        # 監視機能をオフにして
-        if any(k in normalized for k in ["監視機能をオフ", "監視をオフ", "監視機能を無効"]):
-            vc_block_enabled = False
-            save_config()
-            await message.reply("監視機能をオフにしたよ！")
-            return True
-        
-        # システムチェック
-        if any(k in normalized for k in ["システムチェック", "systemcheck", "テスト実行"]):
+        # ===== システムチェック =====
+        check_keywords = ["システムチェック", "systemcheck", "テスト", "test", "診断", "ヘルスチェック", "healthcheck", "動作確認", "状態確認", "チェック"]
+        if has_any(unified, check_keywords) and has_any(unified, ["システム", "ボット", "bot", "動作", "状態", "実行", "確認"]):
             await message.reply("システムをチェックするね！")
             
             results = []
@@ -598,6 +682,45 @@ async def handle_admin_mode_command(message: discord.Message) -> bool:
             
             if all_ok:
                 await message.channel.send("問題なし！全てのシステムは正常に作動しているよ！")
+            return True
+        
+        # ===== フォールバック処理 =====
+        # どのコマンドにも当てはまらなかった場合、最後の手段として推測
+        
+        # 「削除」が含まれていて、メンションがあれば出禁解除を推測
+        if "削除" in unified and message.mentions and not has_any(unified, watch_keywords):
+            user = message.mentions[0]
+            BLOCKED_USERS.discard(user.id)
+            ADMIN_IDS.discard(user.id)
+            save_config()
+            await message.reply(f"{user.mention} を削除したよ！（出禁リストと管理者リストから）")
+            return True
+        
+        # 「削除」が含まれていて、数字があれば監視対象から削除を推測
+        if "削除" in unified:
+            match = re.search(r"(\d{17,20})", content)
+            if match:
+                vc_id = int(match.group(1))
+                TARGET_VC_IDS.discard(vc_id)
+                save_config()
+                await message.reply(f"チャンネルID {vc_id} を監視対象から削除したよ！")
+                return True
+        
+        # 「削除」のみが含まれていればチャット削除を推測
+        if "削除" in unified or "消して" in unified or "掃除" in unified:
+            if isinstance(message.channel, discord.TextChannel):
+                match = re.search(r"(\d+)件", content)
+                limit = int(match.group(1)) if match else 100
+                await message.channel.purge(limit=limit + 1)
+                await message.channel.send("お掃除完了！綺麗になったね！", delete_after=5)
+                return True
+        
+        # 「追加」が含まれていて、メンションがあれば管理者追加を推測
+        if has_any(unified, ADD_KEYWORDS) and message.mentions:
+            user = message.mentions[0]
+            ADMIN_IDS.add(user.id)
+            save_config()
+            await message.reply(f"{user.mention} を管理者に追加したよ！")
             return True
         
         return False
