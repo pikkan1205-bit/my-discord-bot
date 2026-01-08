@@ -68,6 +68,39 @@ def is_authorized(user_id: int) -> bool:
 # ====== 日本時間のタイムゾーン ======
 JST = timezone(timedelta(hours=9))
 
+# ====== 管理者モード状態管理 ======
+# {user_id: last_activity_timestamp}
+admin_mode_users = {}
+ADMIN_MODE_TIMEOUT = 120  # 2分（秒）
+
+def is_in_admin_mode(user_id: int) -> bool:
+    """ユーザーが管理者モード中かチェック"""
+    if user_id not in admin_mode_users:
+        return False
+    last_activity = admin_mode_users[user_id]
+    if (datetime.now(JST) - last_activity).total_seconds() > ADMIN_MODE_TIMEOUT:
+        del admin_mode_users[user_id]
+        return False
+    return True
+
+def enter_admin_mode(user_id: int):
+    """管理者モードに入る"""
+    admin_mode_users[user_id] = datetime.now(JST)
+
+def update_admin_mode(user_id: int):
+    """管理者モードのタイムスタンプを更新"""
+    admin_mode_users[user_id] = datetime.now(JST)
+
+def exit_admin_mode(user_id: int):
+    """管理者モードから抜ける"""
+    if user_id in admin_mode_users:
+        del admin_mode_users[user_id]
+
+def normalize_text(text: str) -> str:
+    """テキストを正規化（スペース除去、小文字化）"""
+    text = text.replace(" ", "").replace("　", "")
+    return text.lower()
+
 # ====== オーナーへのログ通知関数 ======
 async def log_to_owner(log_type: str, user: Union[discord.User, discord.Member], command: str, details: str = ""):
     """管理者アクションまたは権限エラーをオーナーにDMでログ通知"""
@@ -129,6 +162,28 @@ def load_config():
             save_config()
     except Exception as e:
         print(f"❌ 設定の読み込みに失敗しました: {e}")
+
+# ====== 管理者モードタイムアウトチェック ======
+@tasks.loop(seconds=30)
+async def check_admin_mode_timeout():
+    """管理者モードのタイムアウトをチェック"""
+    now = datetime.now(JST)
+    timed_out_users = []
+    
+    for user_id, last_activity in list(admin_mode_users.items()):
+        if (now - last_activity).total_seconds() > ADMIN_MODE_TIMEOUT:
+            timed_out_users.append(user_id)
+            del admin_mode_users[user_id]
+    
+    # タイムアウトしたユーザーに通知
+    for user_id in timed_out_users:
+        try:
+            user = await bot.fetch_user(user_id)
+            await user.send("またいつでも呼んでね！")
+            print(f"⏰ 管理者モードタイムアウト: {user.name}")
+        except Exception as e:
+            print(f"❌ タイムアウト通知失敗: {e}")
+
 
 # ====== 自動pingタスク（日本時間0時） ======
 @tasks.loop(time=time(hour=15, minute=0, second=0))  # UTC 15:00 = JST 0:00
@@ -223,6 +278,10 @@ async def on_ready():
     if not daily_ping.is_running():
         daily_ping.start()
     
+    # 管理者モードタイムアウトチェックを開始
+    if not check_admin_mode_timeout.is_running():
+        check_admin_mode_timeout.start()
+    
     print(f"ログイン成功: {bot.user}")
     
     # 起動完了メッセージをオーナーにDM送信
@@ -245,6 +304,35 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
     
+    content = message.content
+    normalized = normalize_text(content)
+    
+    # フィーロちゃん呼びかけ検出
+    firo_keywords = ["フィーロちゃん", "ふぃーろちゃん", "フィーロ", "ふぃーろ"]
+    firo_called = any(normalize_text(k) in normalized for k in firo_keywords)
+    
+    if firo_called:
+        if message.author.id == OWNER_ID:
+            enter_admin_mode(message.author.id)
+            await message.reply("ご主人様！どうしたの？")
+            return
+        else:
+            await message.reply("フィーロは、フィーロ！")
+            return
+    
+    # 管理者モード中の処理
+    if message.author.id == OWNER_ID and is_in_admin_mode(message.author.id):
+        handled = await handle_admin_mode_command(message)
+        if handled:
+            update_admin_mode(message.author.id)
+            return
+        else:
+            # キーワードに当てはまらない場合
+            await message.reply("ごめんね！もう一回いい？")
+            update_admin_mode(message.author.id)
+            return
+    
+    # DM転送処理
     if isinstance(message.channel, discord.DMChannel):
         if message.author.id == OWNER_ID:
             return
@@ -270,9 +358,259 @@ async def on_message(message: discord.Message):
         except Exception as e:
             print(f"❌ DM転送失敗: {e}")
     
-    # 「〇〇と検索して」パターンに反応
+    # 「〇〇と検索して」パターンに反応（管理者モード外でも動作）
     if "と検索して" in message.content:
         await handle_search_request(message)
+
+
+async def handle_admin_mode_command(message: discord.Message) -> bool:
+    """管理者モードのコマンドを処理。処理した場合True、しなかった場合Falseを返す"""
+    global vc_block_enabled, BLOCKED_USERS, TARGET_VC_IDS, ADMIN_IDS, AUTO_PING_CHANNEL_ID
+    
+    content = message.content
+    # メンションとチャンネル参照を除去してからパターンマッチング
+    content_no_mentions = re.sub(r"<@!?\d+>", "", content)
+    content_no_mentions = re.sub(r"<#\d+>", "", content_no_mentions)
+    normalized = normalize_text(content_no_mentions)
+    
+    try:
+        # @ユーザー名を管理者に追加して（様々な言い回しに対応）
+        if ("管理者" in normalized and "追加" in normalized) or any(k in normalized for k in ["adminに追加", "admin追加"]):
+            if "削除" not in normalized and "解除" not in normalized:
+                if message.mentions:
+                    user = message.mentions[0]
+                    ADMIN_IDS.add(user.id)
+                    save_config()
+                    await message.reply(f"{user.mention} を管理者に追加したよ！")
+                    return True
+        
+        # @ユーザー名を管理者から削除して（様々な言い回しに対応）
+        if ("管理者" in normalized and ("削除" in normalized or "解除" in normalized)) or any(k in normalized for k in ["adminから削除", "admin削除"]):
+            if message.mentions:
+                user = message.mentions[0]
+                ADMIN_IDS.discard(user.id)
+                save_config()
+                await message.reply(f"{user.mention} を管理者から削除したよ！")
+                return True
+        
+        # autopingを#チャンネル名に設定して（様々な言い回しに対応）
+        if (("autoping" in normalized or "オートピング" in normalized) and ("設定" in normalized or "有効" in normalized or "オン" in normalized)):
+            if "無効" not in normalized and "オフ" not in normalized:
+                if message.channel_mentions:
+                    channel = message.channel_mentions[0]
+                    AUTO_PING_CHANNEL_ID = channel.id
+                    save_config()
+                    await message.reply("オートピングを設定したよ！")
+                    return True
+        
+        # autopingを無効化して
+        if ("autoping" in normalized or "オートピング" in normalized) and ("無効" in normalized or "オフ" in normalized):
+            AUTO_PING_CHANNEL_ID = 0
+            save_config()
+            await message.reply("オートピングを無効化したよ！")
+            return True
+        
+        # @ユーザー名をボイスチャット出禁にして（様々な言い回しに対応）
+        if ("出禁" in normalized or "ブロック" in normalized) and "解除" not in normalized:
+            if message.mentions:
+                user = message.mentions[0]
+                BLOCKED_USERS.add(user.id)
+                save_config()
+                await message.reply(f"{user.mention} を出禁にしたよ！")
+                return True
+        
+        # @ユーザー名をボイスチャット出禁解除して
+        if ("出禁" in normalized or "ブロック" in normalized) and "解除" in normalized:
+            if message.mentions:
+                user = message.mentions[0]
+                BLOCKED_USERS.discard(user.id)
+                save_config()
+                await message.reply(f"{user.mention} を出禁から解除したよ！")
+                return True
+        
+        # チャンネルid○○を監視対象に追加して（様々な言い回しに対応）
+        if ("監視" in normalized and "追加" in normalized) and "削除" not in normalized:
+            match = re.search(r"(\d{17,20})", content)
+            if match:
+                vc_id = int(match.group(1))
+                TARGET_VC_IDS.add(vc_id)
+                save_config()
+                await message.reply(f"チャンネルID {vc_id} を監視対象に追加したよ！")
+                return True
+        
+        # チャンネルid○○を監視対象から削除して
+        if ("監視" in normalized and "削除" in normalized):
+            match = re.search(r"(\d{17,20})", content)
+            if match:
+                vc_id = int(match.group(1))
+                TARGET_VC_IDS.discard(vc_id)
+                save_config()
+                await message.reply(f"チャンネルID {vc_id} を監視対象から削除したよ！")
+                return True
+        
+        # チャットを○件削除して / チャットを削除して（監視削除とは別）
+        if (("チャット" in normalized or "メッセージ" in normalized) and "削除" in normalized) or ("削除して" in normalized and "件" in normalized):
+            if "監視" not in normalized:  # 監視対象削除と区別
+                match = re.search(r"(\d+)件", content)
+                limit = int(match.group(1)) if match else 100
+                
+                if isinstance(message.channel, discord.TextChannel):
+                    deleted = await message.channel.purge(limit=limit + 1)
+                    await message.channel.send("お掃除完了！綺麗になったね！", delete_after=5)
+                    return True
+        
+        # @ユーザー名に○○とdm送信して
+        if any(k in normalized for k in ["dm送信", "dmを送信", "dm送って"]):
+            if message.mentions:
+                user = message.mentions[0]
+                # メッセージ内容を抽出
+                dm_match = re.search(r"(?:に|へ)(.+?)(?:と|って)(?:dm|DM)", content, re.IGNORECASE)
+                if not dm_match:
+                    dm_match = re.search(r"(?:dm|DM)(?:送信|送って)(.+)", content, re.IGNORECASE)
+                
+                dm_content = ""
+                if dm_match:
+                    dm_content = dm_match.group(1).strip()
+                
+                # 添付ファイルがある場合
+                files = [await att.to_file() for att in message.attachments] if message.attachments else []
+                
+                try:
+                    await user.send(content=dm_content if dm_content else None, files=files if files else None)
+                    await message.reply("メッセージを送信したよ！")
+                except:
+                    await message.reply("DMの送信に失敗したよ...")
+                return True
+        
+        # ヘルプを表示して / 困った
+        if any(k in normalized for k in ["ヘルプ", "困った", "help"]):
+            await message.reply("ヘルプを表示するね！")
+            # ヘルプ内容を表示
+            embed = discord.Embed(title="📖 ヘルプ", description="管理者モードで使えるコマンド一覧", color=discord.Color.blue())
+            embed.add_field(name="管理者管理", value="「@ユーザーを管理者に追加して」\n「@ユーザーを管理者から削除して」", inline=False)
+            embed.add_field(name="オートピング", value="「autopingを#チャンネルに設定して」\n「autopingを無効化して」", inline=False)
+            embed.add_field(name="VC出禁", value="「@ユーザーをボイスチャット出禁にして」\n「@ユーザーをボイスチャット出禁解除して」", inline=False)
+            embed.add_field(name="監視対象", value="「チャンネルidXXXを監視対象に追加して」\n「チャンネルidXXXを監視対象から削除して」", inline=False)
+            embed.add_field(name="その他", value="「チャットをX件削除して」\n「@ユーザーに○○とdm送信して」\n「リストを表示して」\n「pingを表示して」\n「再起動して」\n「○○と発言して」\n「監視機能をオン/オフにして」\n「システムチェック」", inline=False)
+            await message.channel.send(embed=embed)
+            return True
+        
+        # リストを表示して / 現在の設定を確認したい
+        if any(k in normalized for k in ["リストを表示", "設定を確認", "リスト表示"]):
+            await message.reply("リストを表示するね！")
+            
+            # ブロックユーザーリスト
+            if BLOCKED_USERS:
+                user_list = []
+                for uid in BLOCKED_USERS:
+                    try:
+                        user = await bot.fetch_user(uid)
+                        user_list.append(f"• {user.name} ({uid})")
+                    except:
+                        user_list.append(f"• 不明なユーザー ({uid})")
+                embed1 = discord.Embed(title="🚫 対象ユーザーリスト", description="\n".join(user_list), color=discord.Color.red())
+            else:
+                embed1 = discord.Embed(title="🚫 対象ユーザーリスト", description="登録なし", color=discord.Color.red())
+            await message.channel.send(embed=embed1)
+            
+            # 管理者リスト
+            if ADMIN_IDS:
+                admin_list = []
+                for uid in ADMIN_IDS:
+                    try:
+                        user = await bot.fetch_user(uid)
+                        admin_list.append(f"• {user.name} ({uid})")
+                    except:
+                        admin_list.append(f"• 不明なユーザー ({uid})")
+                embed2 = discord.Embed(title="👑 管理者リスト", description="\n".join(admin_list), color=discord.Color.gold())
+            else:
+                embed2 = discord.Embed(title="👑 管理者リスト", description="登録なし", color=discord.Color.gold())
+            await message.channel.send(embed=embed2)
+            return True
+        
+        # pingを表示して
+        if any(k in normalized for k in ["pingを表示", "ping表示", "ピンを表示"]):
+            await message.reply("pingを表示するね！")
+            latency = round(bot.latency * 1000)
+            embed = discord.Embed(title="🏓 Pong!", description=f"レイテンシ: **{latency}ms**", color=discord.Color.green())
+            await message.channel.send(embed=embed)
+            return True
+        
+        # 再起動して
+        if any(k in normalized for k in ["再起動", "リスタート", "restart"]):
+            await message.reply("再起動するね！")
+            import asyncio
+            await asyncio.sleep(3)
+            await bot.close()
+            sys.exit(0)
+        
+        # ○○と発言して
+        if any(k in normalized for k in ["と発言して", "って言って", "と言って"]):
+            match = re.search(r"(.+?)(?:と発言して|って言って|と言って)", content)
+            if match:
+                say_content = match.group(1).strip()
+                await message.channel.send(say_content)
+                return True
+        
+        # 監視機能をオンにして
+        if any(k in normalized for k in ["監視機能をオン", "監視をオン", "監視機能を有効"]):
+            vc_block_enabled = True
+            save_config()
+            await message.reply("監視機能をオンにしたよ！")
+            return True
+        
+        # 監視機能をオフにして
+        if any(k in normalized for k in ["監視機能をオフ", "監視をオフ", "監視機能を無効"]):
+            vc_block_enabled = False
+            save_config()
+            await message.reply("監視機能をオフにしたよ！")
+            return True
+        
+        # システムチェック
+        if any(k in normalized for k in ["システムチェック", "systemcheck", "テスト実行"]):
+            await message.reply("システムをチェックするね！")
+            
+            results = []
+            all_ok = True
+            
+            latency = round(bot.latency * 1000)
+            if latency < 200:
+                results.append(f"✅ レイテンシ: {latency}ms")
+            else:
+                results.append(f"⚠️ レイテンシ: {latency}ms（高め）")
+                all_ok = False
+            
+            try:
+                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                    json.load(f)
+                results.append("✅ 設定ファイル: 読み込み可能")
+            except:
+                results.append("❌ 設定ファイル: エラー")
+                all_ok = False
+            
+            results.append(f"✅ VC自動切断機能: {'ON' if vc_block_enabled else 'OFF'}")
+            results.append(f"✅ 対象ユーザー数: {len(BLOCKED_USERS)}人")
+            results.append(f"✅ 対象VC数: {len(TARGET_VC_IDS)}個")
+            results.append(f"✅ 管理者数: {len(ADMIN_IDS)}人")
+            
+            embed = discord.Embed(title="🔧 システムチェック結果", description="\n".join(results), color=discord.Color.green())
+            await message.channel.send(embed=embed)
+            
+            if all_ok:
+                await message.channel.send("問題なし！全てのシステムは正常に作動しているよ！")
+            return True
+        
+        return False
+        
+    except Exception as e:
+        # エラーをオーナーに報告
+        try:
+            owner = await bot.fetch_user(OWNER_ID)
+            await owner.send(f"❌ 管理者モードエラー: {e}\nコマンド: {content}")
+        except:
+            pass
+        await message.reply(f"エラーが発生したよ: {e}")
+        return True
 
 
 async def handle_search_request(message: discord.Message):
