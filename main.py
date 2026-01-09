@@ -445,6 +445,15 @@ async def handle_admin_mode_command(message: discord.Message) -> bool:
     OFF_KEYWORDS = ["オフ", "無効", "止めて", "停止", "ストップ", "終了", "disable", "off", "やめて", "切って"]
     
     try:
+        # ===== 管理者モード終了 ===== ← ここに追加
+        exit_keywords = ["終了", "おわり", "終わり", "exit", "quit", "bye", "バイバイ", "またね", "さようなら", "帰って", "もういい", "閉じて"]
+        if has_any(unified, exit_keywords):
+            # "終了"が他のコマンド（例：VCブロック終了）と混同されないようチェック
+            if not has_any(unified, ["vc", "ボイス", "監視", "機能", "システム", "autoping", "ブロック"]):
+                exit_admin_mode(message.author.id)
+                await message.reply("了解！またいつでも呼んでね！")
+                return True
+                
         # ===== 管理者追加 =====
         admin_add_keywords = ["管理者", "admin", "アドミン", "モデレーター", "mod", "権限"]
         if has_any(unified, admin_add_keywords) and has_any(unified, ADD_KEYWORDS):
@@ -1184,6 +1193,19 @@ async def dm_command(interaction: discord.Interaction, user: discord.User, messa
         await interaction.followup.send(f"❌ {user.name} はDMを受け付けていません", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ DM送信に失敗しました: {e}", ephemeral=True)
+
+# ====== スラッシュコマンド /exit ====== ← ここに追加
+@bot.tree.command(name="exit", description="管理者モードを終了（オーナーのみ）")
+async def exit_command(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("このコマンドはオーナーのみが使用できます。", ephemeral=True)
+        return
+    
+    if is_in_admin_mode(interaction.user.id):
+        exit_admin_mode(interaction.user.id)
+        await interaction.response.send_message("✅ 管理者モードを終了しました", ephemeral=True)
+    else:
+        await interaction.response.send_message("ℹ️ 管理者モードは起動していません", ephemeral=True)
 
 
 # ====== スラッシュコマンド /ping ======
