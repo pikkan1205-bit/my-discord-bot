@@ -324,7 +324,9 @@ async def on_message(message: discord.Message):
     if message.author.id == OWNER_ID and is_in_admin_mode(message.author.id):
         handled = await handle_admin_mode_command(message)
         if handled:
-            update_admin_mode(message.author.id)
+            # 🔧 修正: まだ管理者モードにいる場合のみタイムスタンプ更新
+            if is_in_admin_mode(message.author.id):
+                update_admin_mode(message.author.id)
             return
         else:
             # キーワードに当てはまらない場合
