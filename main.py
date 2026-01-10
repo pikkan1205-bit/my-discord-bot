@@ -399,67 +399,48 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
     
-    content = message.content
-    normalized = normalize_text(content)
-    
     # ====== ブロスタプロフィール画像認識（指定チャンネルのみ） ======
     if message.channel.id in BRAWLSTARS_CHANNELS and message.attachments:
         for attachment in message.attachments:
-            # 画像ファイルかチェック
             if attachment.content_type and attachment.content_type.startswith('image/'):
                 async with message.channel.typing():
                     result = await extract_brawlstars_name(attachment.url)
                     
                     if result and result['name']:
                         player_name = result['name']
-                        user_id_str = str(message.author.id)
                         
-                        # 既に登録されているかチェック
-                        is_already_registered = user_id_str in player_names
-                        
-                        if is_already_registered:
-                            # 登録回数をインクリメント
-                            player_register_count[user_id_str] = player_register_count.get(user_id_str, 1) + 1
-                            count = player_register_count[user_id_str]
+                        # 名前がすでに登録されているかチェック
+                        if player_name in player_names:
+                            # 登録回数を増やす
+                            player_register_count[player_name] = player_register_count.get(player_name, 0) + 1
+                            count = player_register_count[player_name]
                             
-                            # 既存データを更新
-                            if isinstance(player_names[user_id_str], dict):
-                                player_names[user_id_str]['name'] = player_name
-                                player_names[user_id_str]['trophies'] = result.get('trophies')
-                                player_names[user_id_str]['last_updated'] = datetime.now(JST).isoformat()
-                            
+                            # データの更新
+                            player_names[player_name]['last_updated'] = datetime.now(JST).isoformat()
                             save_player_names()
                             
-                            # 既に追加済みのメッセージ
-                            await message.channel.send(f"お荷物は既に追加されてるよ！{count}回目だね")
-                            print(f"🔄 プロフィール再登録: {message.author.name} → {player_name} ({count}回目)")
+                            await message.channel.send(f"「{player_name}」は既に追加されてるよ！通算{count}回目だね")
+                            print(f"🔄 報告カウントアップ: {player_name} ({count}回目)")
                         
                         else:
                             # 新規登録
-                            player_data = {
+                            player_names[player_name] = {
                                 'name': player_name,
-                                'player_id': result.get('player_id'),
-                                'trophies': result.get('trophies'),
                                 'registered_at': datetime.now(JST).isoformat(),
                                 'last_updated': datetime.now(JST).isoformat()
                             }
-                            player_names[user_id_str] = player_data
-                            player_register_count[user_id_str] = 1
+                            player_register_count[player_name] = 1
                             save_player_names()
                             
-                            # 新規登録のメッセージ
-                            await message.channel.send("お荷物プレイヤーを記録したよ！")
-                            print(f"✅ プロフィール新規登録: {message.author.name} → {player_name}")
-                    
+                            await message.channel.send(f"お荷物プレイヤー「{player_name}」を新しく記録したよ！")
+                            print(f"✅ 新規名前登録: {player_name}")
                     else:
-                        # 認識失敗（何もしない）
                         print(f"⚠️ プロフィール認識失敗: {message.author.name}")
-                
-                # 最初の画像のみ処理
-                break
-        
-        # このチャンネルでは他の処理をスキップ
+                break # 最初の1枚のみ処理
         return
+
+    # ... (これ以降に「フィーロちゃん」呼びかけや管理者モードのコードを続ける) ...
+
     
     # フィーロちゃん呼びかけ検出
     firo_keywords = ["フィーロちゃん", "ふぃーろちゃん", "フィーロ", "ふぃーろ"]
