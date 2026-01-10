@@ -1486,18 +1486,15 @@ async def scanhistory_command(interaction: discord.Interaction, channel: Optiona
     
     target_channel = channel or interaction.channel
     
-    # 対象チャンネルかチェック
     if target_channel.id not in BRAWLSTARS_CHANNELS:
         channel_ids = list(BRAWLSTARS_CHANNELS)
         channels_str = ", ".join([f"<#{ch_id}>" for ch_id in channel_ids])
         await interaction.response.send_message(
-            f"❌ このコマンドは指定されたブロスタチャンネルでのみ使用できます。\n"
-            f"有効なチャンネル: {channels_str}",
+            f"❌ 指定されたブロスタチャンネルでのみ使用できます。\n有効なチャンネル: {channels_str}",
             ephemeral=True
         )
         return
     
-    # 最大値チェック
     if limit > 500:
         limit = 500
     
@@ -1515,58 +1512,48 @@ async def scanhistory_command(interaction: discord.Interaction, channel: Optiona
                 for attachment in msg.attachments:
                     if attachment.content_type and attachment.content_type.startswith('image/'):
                         messages_with_images.append((msg, attachment))
-                        break  # 1メッセージにつき1画像のみ
+                        break
         
         if not messages_with_images:
             await interaction.followup.send("📋 画像が見つかりませんでした。")
             return
         
-        # 処理開始通知
         await interaction.followup.send(f"🔍 {len(messages_with_images)}件の画像を検出しました。処理を開始します...")
         
-        success_count = 0
-        existing_count = 0
-        failed_count = 0
+        success_count = 0  # 新しいプレイヤー名の数
+        updated_count = 0  # 既にあった名前の追加報告数
+        failed_count = 0   # 認識失敗
         
-            for msg, attachment in messages_with_images:
+        for msg, attachment in messages_with_images:
             result = await extract_brawlstars_name(attachment.url)
             
             if result and result['name']:
                 player_name = result['name']
-                user_id_str = str(msg.author.id)
                 
-                # 新規かどうかの判定
-                is_new = user_id_str not in player_names
-                
-                # データを最新（またはスキャンしたもの）に更新
-                player_data = {
-                    'name': player_name,
-                    'player_id': result.get('player_id'),
-                    'trophies': result.get('trophies'),
-                    'registered_at': msg.created_at.isoformat(),
-                    'last_updated': msg.created_at.isoformat()
-                }
-                player_names[user_id_str] = player_data
-                if is_new:
-                    # 初めての登録
-                    player_register_count[user_id_str] = 1
-                    success_count += 1
-                    print(f"✅ 新規登録: {msg.author.name} → {player_name}")
+                # 【重要】プレイヤー名がすでに登録されているかチェック
+                if player_name in player_names:
+                    # 既に登録されている名前なら回数を増やす
+                    player_register_count[player_name] = player_register_count.get(player_name, 1) + 1
+                    updated_count += 1
+                    # 最終更新日だけ更新
+                    player_names[player_name]['last_updated'] = msg.created_at.isoformat()
+                    print(f"🔄 重複報告: {player_name} (通算 {player_register_count[player_name]}回)")
                 else:
-                    # 2回目以降の登録（カウントを1増やす）
-                    current_count = player_register_count.get(user_id_str, 1)
-                    player_register_count[user_id_str] = current_count + 1
-                    existing_count += 1
-                    print(f"🔄 データ更新 & カウントアップ({current_count + 1}回): {msg.author.name} → {player_name}")
+                    # まったく新しい名前なら新規登録
+                    player_data = {
+                        'name': player_name,
+                        'registered_at': msg.created_at.isoformat(),
+                        'last_updated': msg.created_at.isoformat()
+                    }
+                    player_names[player_name] = player_data
+                    player_register_count[player_name] = 1
+                    success_count += 1
+                    print(f"✅ 新規名前登録: {player_name}")
             else:
                 failed_count += 1
-                print(f"❌ 認識失敗: {msg.author.name} のメッセージ")
-
         
-        # 保存
         save_player_names()
         
-        # 結果を報告
         end_time = datetime.now(JST)
         elapsed = int((end_time - start_time).total_seconds())
         
@@ -1574,11 +1561,10 @@ async def scanhistory_command(interaction: discord.Interaction, channel: Optiona
             title="📊 過去データ一括登録完了",
             color=discord.Color.green()
         )
-        result_embed.add_field(name="✅ 新規登録", value=f"{success_count}人", inline=True)
-        result_embed.add_field(name="⏭️ スキップ", value=f"{existing_count}人", inline=True)
+        result_embed.add_field(name="👤 新規プレイヤー", value=f"{success_count}人", inline=True)
+        result_embed.add_field(name="🔄 追加報告(回数UP)", value=f"{updated_count}件", inline=True)
         result_embed.add_field(name="❌ 認識失敗", value=f"{failed_count}枚", inline=True)
-        result_embed.add_field(name="📋 処理した画像", value=f"{len(messages_with_images)}枚", inline=False)
-        result_embed.set_footer(text=f"処理時間: {elapsed}秒")
+        result_embed.set_footer(text=f"合計処理画像: {len(messages_with_images)}枚 | 処理時間: {elapsed}秒")
         
         await interaction.followup.send(embed=result_embed)
         
