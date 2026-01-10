@@ -1384,60 +1384,39 @@ async def exit_command(interaction: discord.Interaction):
         await interaction.response.send_message("ℹ️ 管理者モードは起動していません", ephemeral=True)
 
 # ====== スラッシュコマンド /playerlist ======
-@bot.tree.command(name="playerlist", description="登録されているプレイヤー名一覧を表示")
+@bot.tree.command(name="playerlist", description="登録されているお荷物プレイヤー一覧を表示")
 async def playerlist_command(interaction: discord.Interaction):
     if not player_names:
         await interaction.response.send_message("📋 登録されているプレイヤーはいません", ephemeral=False)
         return
     
     embed = discord.Embed(
-        title="🎮 お荷物プレイヤー一覧",
-        color=discord.Color.blue()
+        title="🎮 お荷物プレイヤーリスト",
+        description="報告回数が多い順に表示しています",
+        color=discord.Color.red()
     )
     
-    guild = interaction.guild
-    player_list = []
-    
-    # トロフィー数でソート
+    # 【修正ポイント】トロフィーではなく「報告回数」でソートする
     sorted_players = sorted(
         player_names.items(),
-        key=lambda x: x[1].get('trophies', 0) if isinstance(x[1], dict) else 0,
+        key=lambda x: player_register_count.get(x[0], 0),
         reverse=True
     )
     
-    for user_id_str, player_data in sorted_players:
-        try:
-            user_id = int(user_id_str)
-            
-            # 古いデータ形式（文字列のみ）への対応
-            if isinstance(player_data, str):
-                bs_name = player_data
-                trophy_str = ""
-            else:
-                bs_name = player_data.get('name', 'Unknown')
-                trophies = player_data.get('trophies')
-                trophy_str = f" - 🏆 {trophies:,}" if trophies else ""
-            
-            # 登録回数を取得
-            count = player_register_count.get(user_id_str, 1)
-            count_str = f" (登録{count}回)" if count > 1 else ""
-            
-            if guild:
-                try:
-                    member = await guild.fetch_member(user_id)
-                    player_list.append(f"• **{bs_name}**{trophy_str}{count_str}\n  └ {member.mention}")
-                except:
-                    player_list.append(f"• **{bs_name}**{trophy_str}{count_str}")
-            else:
-                player_list.append(f"• **{bs_name}**{trophy_str}{count_str}")
-        except:
-            if isinstance(player_data, str):
-                player_list.append(f"• **{player_data}**")
-            else:
-                player_list.append(f"• **{player_data.get('name', 'Unknown')}**")
+    player_list = []
+    for player_name, _ in sorted_players:
+        # 登録回数を取得
+        count = player_register_count.get(player_name, 1)
+        # リストに追加
+        player_list.append(f"• **{player_name}** — `{count}回報告`")
     
-    embed.description = "\n".join(player_list) if player_list else "データなし"
-    embed.set_footer(text=f"合計: {len(player_names)}人")
+    # 1024文字制限対策（念のため）
+    description_text = "\n".join(player_list)
+    if len(description_text) > 4000:
+        description_text = description_text[:3997] + "..."
+        
+    embed.description = description_text
+    embed.set_footer(text=f"合計登録数: {len(player_names)}人")
     
     await interaction.response.send_message(embed=embed, ephemeral=False)
 
@@ -1549,7 +1528,7 @@ async def scanhistory_command(interaction: discord.Interaction, channel: Optiona
         existing_count = 0
         failed_count = 0
         
-                for msg, attachment in messages_with_images:
+            for msg, attachment in messages_with_images:
             result = await extract_brawlstars_name(attachment.url)
             
             if result and result['name']:
