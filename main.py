@@ -1472,7 +1472,7 @@ async def myprofile_command(interaction: discord.Interaction):
 @bot.tree.command(name="scanhistory", description="過去の画像を遡って一括登録（オーナーのみ）")
 @app_commands.describe(
     channel="スキャンするチャンネル（省略時は現在のチャンネル）",
-    limit="遡るメッセージ数（デフォルト: 100、最大500）"
+    limit="遡るメッセージ数（デフォルト: 100、最大2000）"
 )
 async def scanhistory_command(interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None, limit: int = 100):
     if interaction.user.id != OWNER_ID:
@@ -1490,8 +1490,8 @@ async def scanhistory_command(interaction: discord.Interaction, channel: Optiona
         )
         return
     
-    if limit > 500:
-        limit = 500
+    if limit > 2000:
+        limit = 2000
     
     await interaction.response.defer(ephemeral=True)
     
