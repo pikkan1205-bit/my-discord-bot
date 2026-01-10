@@ -2086,7 +2086,7 @@ def load_player_names():
         player_register_count = {}
 
 
-# ====== VC監視処理 ======
+# ====== VCブロック処理 ======
 @bot.event
 async def on_voice_state_update(member, before, after):
     global vc_block_enabled, BLOCKED_USERS, TARGET_VC_IDS
@@ -2101,22 +2101,13 @@ async def on_voice_state_update(member, before, after):
                     log_message = f"{member.name} をVCから切断しました"
                     print(log_message)
                     
-                    # オーナーにDM送信
+                    # オーナーに通知
                     try:
                         owner = await bot.fetch_user(OWNER_ID)
-                        if owner is None:
-                            print(f"❌ オーナー（ID: {OWNER_ID}）が見つかりません")
-                        else:
-                            # VC情報を安全に取得
-                            if after.channel:
-                                vc_name = after.channel.name
-                                vc_id = after.channel.id
-                            else:
-                                vc_name = "不明"
-                                vc_id = "不明"
-                            
-                            # 現在時刻を取得
-                            current_time = datetime.now().strftime("%Y年%m月%d日 %H:%M:%S")
+                        if owner:
+                            vc_name = after.channel.name if after.channel else "不明"
+                            vc_id = after.channel.id if after.channel else "不明"
+                            current_time = datetime.now(JST).strftime("%Y年%m月%d日 %H:%M:%S")
                             
                             embed = discord.Embed(
                                 title="VC自動切断 - ログ",
@@ -2128,10 +2119,31 @@ async def on_voice_state_update(member, before, after):
                             embed.add_field(name="時刻", value=current_time, inline=False)
                             await owner.send(embed=embed)
                             print(f"✅ オーナーにDMを送信しました [{current_time}]")
+                    except discord.Forbidden:
+                        print(f"⚠️ オーナー({OWNER_ID})にDMを送信できません（DM拒否設定）")
+                    except discord.NotFound:
+                        print(f"❌ オーナー({OWNER_ID})が見つかりません")
                     except Exception as e:
-                        print(f"❌ DMの送信に失敗しました: {type(e).__name__}: {e}")
-                except:
-                    print("❌ 権限不足で切断できません")
+                        print(f"❌ DM送信エラー: {type(e).__name__}: {e}")
+                        
+                except discord.Forbidden:
+                    print(f"❌ 権限不足: {member.name} を切断できません（Move Members権限が必要）")
+                    # オーナーに権限エラーを通知
+                    try:
+                        owner = await bot.fetch_user(OWNER_ID)
+                        if owner:
+                            await owner.send(
+                                f"⚠️ **権限エラー**\n"
+                                f"{member.name} を切断しようとしましたが、権限が不足しています。\n"
+                                f"ボットに「メンバーを移動」権限を付与してください。"
+                            )
+                    except:
+                        pass
+                except discord.HTTPException as e:
+                    print(f"❌ Discord APIエラー: {e}")
+                except Exception as e:
+                    print(f"❌ 予期しないエラー: {type(e).__name__}: {e}")
+                    await send_error_to_owner("VC切断エラー", e, f"ユーザー: {member.name}")
 
 
 # ====== エラーハンドラ ======
