@@ -1277,14 +1277,13 @@ async def listadmin_command(interaction: discord.Interaction):
 
 
 # ====== スラッシュコマンド /say ======
-@bot.tree.command(name="say", description="ボットにメッセージを発言させる（オーナーのみ）")
+@bot.tree.command(name="say", description="ボットにメッセージを発言させる（管理者のみ）")
 @app_commands.describe(
     message="発言させるメッセージ",
     channel="発言するチャンネル（省略時は現在のチャンネル）"
 )
 async def say_command(interaction: discord.Interaction, message: str, channel: Optional[discord.TextChannel] = None):
-    SAY_ALLOWED_USERS = [OWNER_ID, 1127253848155754557]
-    if interaction.user.id not in SAY_ALLOWED_USERS:
+    if not is_authorized(interaction.user.id):  # ← ここを修正
         await interaction.response.send_message("このコマンドを使う権限はありません。", ephemeral=True)
         await log_to_owner("error", interaction.user, "/say", f"メッセージ: {message}")
         return
@@ -1304,6 +1303,7 @@ async def say_command(interaction: discord.Interaction, message: str, channel: O
         await interaction.followup.send(f"✅ メッセージを送信しました", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ メッセージの送信に失敗しました: {e}", ephemeral=True)
+
 
 
 # ====== スラッシュコマンド /clear ======
