@@ -1377,29 +1377,28 @@ async def playerlist_command(interaction: discord.Interaction):
         color=discord.Color.red()
     )
     
-    # 【修正ポイント】トロフィーではなく「報告回数」でソートする
+    # 報告回数（player_register_count）でソート
     sorted_players = sorted(
-        player_names.items(),
-        key=lambda x: player_register_count.get(x[0], 0),
+        player_names.keys(),
+        key=lambda name: player_register_count.get(name, 0),
         reverse=True
     )
     
     player_list = []
-    for player_name, _ in sorted_players:
-        # 登録回数を取得
-        count = player_register_count.get(player_name, 1)
-        # リストに追加
-        player_list.append(f"• **{player_name}** — `{count}回報告`")
+    for name in sorted_players:
+        count = player_register_count.get(name, 1)
+        player_list.append(f"• **{name}** — `{count}回報告`")
     
-    # 1024文字制限対策（念のため）
+    # Discordのエンドベッド制限（4096文字）対策
     description_text = "\n".join(player_list)
     if len(description_text) > 4000:
         description_text = description_text[:3997] + "..."
         
     embed.description = description_text
-    embed.set_footer(text=f"合計登録数: {len(player_names)}人")
+    embed.set_footer(text=f"合計登録人数: {len(player_names)}人")
     
     await interaction.response.send_message(embed=embed, ephemeral=False)
+
 
 
 # ====== スラッシュコマンド /myprofile ======
