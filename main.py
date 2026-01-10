@@ -1547,7 +1547,6 @@ async def scanhistory_command(interaction: discord.Interaction, channel: Optiona
                     'last_updated': msg.created_at.isoformat()
                 }
                 player_names[user_id_str] = player_data
-                
                 if is_new:
                     # 初めての登録
                     player_register_count[user_id_str] = 1
