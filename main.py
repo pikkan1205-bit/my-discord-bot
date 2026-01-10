@@ -1387,7 +1387,7 @@ async def exit_command(interaction: discord.Interaction):
 @bot.tree.command(name="playerlist", description="登録されているプレイヤー名一覧を表示")
 async def playerlist_command(interaction: discord.Interaction):
     if not player_names:
-        await interaction.response.send_message("📋 登録されているプレイヤーはいません", ephemeral=True)
+        await interaction.response.send_message("📋 登録されているプレイヤーはいません", ephemeral=False)
         return
     
     embed = discord.Embed(
@@ -1439,7 +1439,7 @@ async def playerlist_command(interaction: discord.Interaction):
     embed.description = "\n".join(player_list) if player_list else "データなし"
     embed.set_footer(text=f"合計: {len(player_names)}人")
     
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed, ephemeral=False)
 
 
 # ====== スラッシュコマンド /myprofile ======
