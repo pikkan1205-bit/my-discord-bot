@@ -442,6 +442,18 @@ async def on_message(message: discord.Message):
                 break # 最初の1枚のみ処理
         return
 
+    # --- 名前候補を表示するための関数 ---
+async def name_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    # 登録されている名前の中から、入力中の文字が含まれるものを最大25件抽出
+    choices = [
+        app_commands.Choice(name=name, value=name)
+        for name in player_names.keys() if current.lower() in name.lower()
+    ]
+    return choices[:25]
+
     # ... (これ以降に「フィーロちゃん」呼びかけや管理者モードのコードを続ける) ...
 
     
@@ -1554,6 +1566,47 @@ async def scanhistory_command(interaction: discord.Interaction, channel: Optiona
     except Exception as e:
         await interaction.followup.send(f"❌ エラーが発生しました: {e}")
         print(f"❌ 一括登録エラー: {e}")
+
+# ====== スラッシュコマンド /player_edit (名前の修正) ======
+@bot.tree.command(name="player_edit", description="登録されたプレイヤー名を修正します（オーナーのみ）")
+@app_commands.describe(old_name="修正したい現在の名前（候補から選択可）", new_name="正しい名前")
+@app_commands.autocomplete(old_name=name_autocomplete) # 候補を出す設定
+async def player_edit_command(interaction: discord.Interaction, old_name: str, new_name: str):
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("オーナーのみ使用可能です。", ephemeral=True)
+        return
+
+    if old_name not in player_names:
+        await interaction.response.send_message(f"❌ 「{old_name}」は見つかりませんでした。", ephemeral=True)
+        return
+
+    player_names[new_name] = player_names.pop(old_name)
+    player_names[new_name]['name'] = new_name
+    if old_name in player_register_count:
+        player_register_count[new_name] = player_register_count.pop(old_name)
+
+    save_player_names()
+    await interaction.response.send_message(f"✅ 修正完了：`{old_name}` → `{new_name}`")
+
+# ====== スラッシュコマンド /player_delete (データの削除) ======
+@bot.tree.command(name="player_delete", description="指定したプレイヤーのデータを削除します（オーナーのみ）")
+@app_commands.describe(name="削除したいプレイヤー名（候補から選択可）")
+@app_commands.autocomplete(name=name_autocomplete) # 候補を出す設定
+async def player_delete_command(interaction: discord.Interaction, name: str):
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("オーナーのみ使用可能です。", ephemeral=True)
+        return
+
+    if name not in player_names:
+        await interaction.response.send_message(f"❌ 「{name}」は見つかりませんでした。", ephemeral=True)
+        return
+
+    del player_names[name]
+    if name in player_register_count:
+        del player_register_count[name]
+
+    save_player_names()
+    await interaction.response.send_message(f"🗑️ 「{name}」のデータを削除しました。")
 
 
 # ====== スラッシュコマンド /ping ======
