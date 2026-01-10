@@ -1982,6 +1982,11 @@ async def extract_brawlstars_name(image_url: str) -> Optional[dict]:
     if not text:
         return None
     
+    # 【追加】「報告」という文字が含まれていたらリザルト画面と判断して終了
+    if "報告" in text:
+        print("⚠️ リザルト画面（報告ボタンあり）を検出したためスキップします。")
+        return None
+    
     lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
     
     result = {
@@ -1989,6 +1994,8 @@ async def extract_brawlstars_name(image_url: str) -> Optional[dict]:
         'player_id': None,
         'trophies': None
     }
+    # ...（この後に続く名前抽出ロジック）
+
     
     # デバッグ用：認識された全テキストを出力
     print(f"🔍 認識テキスト:\n{text}\n")
