@@ -54,16 +54,6 @@ try:
 except Exception as e:
     print(f"❌ Google Vision API初期化失敗: {e}")
 
-        
-# Google Custom Search サービス初期化
-google_service = None
-if GOOGLE_API_KEY and GOOGLE_CSE_ID:
-    try:
-        google_service = build("customsearch", "v1", developerKey=GOOGLE_API_KEY)
-        print("✅ Google検索API初期化完了")
-    except Exception as e:
-        print(f"❌ Google検索API初期化失敗: {e}")
-
 # ====== 環境変数から設定を読み込み ======
 # オーナーID（必須）
 OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
@@ -120,18 +110,6 @@ BRAWLSTARS_CHANNELS = {
 
 # データ永続化用ファイル
 PLAYER_NAMES_FILE = "player_names.json"
-
-# ===================================
-
-
-# VC自動切断機能の初期状態
-vc_block_enabled = True  # 初期ON
-
-# 自動pingを送信するチャンネルID（0の場合は無効）
-AUTO_PING_CHANNEL_ID = 0
-
-# データ永続化用ファイル
-CONFIG_FILE = "vcblock_config.json"
 
 # ===================================
 
@@ -355,10 +333,36 @@ async def run_daily_test(channel):
 @bot.event
 async def on_ready():
     load_config()
-    load_player_names()  # ← この行を追加
+    load_player_names()
     await bot.tree.sync()
     
-    # ... 残りのコードはそのまま
+    # ステータスを設定
+    activity = discord.Game(name="ブロスタ")
+    await bot.change_presence(activity=activity)
+    
+    # 自動pingタスクを開始
+    if not daily_ping.is_running():
+        daily_ping.start()
+    
+    # 管理者モードタイムアウトチェックを開始
+    if not check_admin_mode_timeout.is_running():
+        check_admin_mode_timeout.start()
+    
+    print(f"ログイン成功: {bot.user}")
+    
+    # 起動完了メッセージをオーナーにDM送信
+    try:
+        owner = await bot.fetch_user(OWNER_ID)
+        current_time = datetime.now(JST).strftime("%Y年%m月%d日 %H:%M:%S")
+        embed = discord.Embed(
+            title="✅ 起動完了",
+            description=f"ボットが正常に起動しました。",
+            color=discord.Color.green()
+        )
+        embed.set_footer(text=f"起動時刻: {current_time}")
+        await owner.send(embed=embed)
+    except Exception as e:
+        print(f"❌ 起動メッセージ送信失敗: {e}")
 
     
     # ステータスを設定
