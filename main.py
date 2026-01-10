@@ -216,16 +216,19 @@ def save_config():
         "vc_block_enabled": vc_block_enabled,
         "auto_ping_channel_id": AUTO_PING_CHANNEL_ID
     }
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(config, f, indent=2)
-    print(f"💾 設定を保存しました")
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        print(f"💾 設定を保存しました")
+    except Exception as e:
+        print(f"❌ 設定保存エラー: {e}")
 
 def load_config():
     """JSONファイルから設定を読み込む"""
     global BLOCKED_USERS, TARGET_VC_IDS, vc_block_enabled, ADMIN_IDS, AUTO_PING_CHANNEL_ID
     try:
         if os.path.exists(CONFIG_FILE):
-            with open(CONFIG_FILE, "r") as f:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 config = json.load(f)
             ADMIN_IDS = set(config.get("admin_ids", []))
             BLOCKED_USERS = set(config.get("blocked_users", []))
@@ -236,8 +239,16 @@ def load_config():
         else:
             print(f"⚠️ 設定ファイルが見つかりません。初期値を使用します")
             save_config()
+    except json.JSONDecodeError as e:
+        print(f"❌ 設定ファイルが破損しています: {e}")
+        print(f"ℹ️ バックアップを作成して初期化します")
+        if os.path.exists(CONFIG_FILE):
+            import shutil
+            shutil.copy(CONFIG_FILE, f"{CONFIG_FILE}.backup")
+        save_config()
     except Exception as e:
         print(f"❌ 設定の読み込みに失敗しました: {e}")
+
 
 # ====== 管理者モードタイムアウトチェック ======
 @tasks.loop(seconds=30)
@@ -387,6 +398,65 @@ async def on_message(message: discord.Message):
     content = message.content
     normalized = normalize_text(content)
     
+    # ====== ブロスタプロフィール画像認識（指定チャンネルのみ） ======
+    if message.channel.id in BRAWLSTARS_CHANNELS and message.attachments:
+        for attachment in message.attachments:
+            # 画像ファイルかチェック
+            if attachment.content_type and attachment.content_type.startswith('image/'):
+                async with message.channel.typing():
+                    result = await extract_brawlstars_name(attachment.url)
+                    
+                    if result and result['name']:
+                        player_name = result['name']
+                        user_id_str = str(message.author.id)
+                        
+                        # 既に登録されているかチェック
+                        is_already_registered = user_id_str in player_names
+                        
+                        if is_already_registered:
+                            # 登録回数をインクリメント
+                            player_register_count[user_id_str] = player_register_count.get(user_id_str, 1) + 1
+                            count = player_register_count[user_id_str]
+                            
+                            # 既存データを更新
+                            if isinstance(player_names[user_id_str], dict):
+                                player_names[user_id_str]['name'] = player_name
+                                player_names[user_id_str]['trophies'] = result.get('trophies')
+                                player_names[user_id_str]['last_updated'] = datetime.now(JST).isoformat()
+                            
+                            save_player_names()
+                            
+                            # 既に追加済みのメッセージ
+                            await message.channel.send(f"お荷物は既に追加されてるよ！{count}回目だね")
+                            print(f"🔄 プロフィール再登録: {message.author.name} → {player_name} ({count}回目)")
+                        
+                        else:
+                            # 新規登録
+                            player_data = {
+                                'name': player_name,
+                                'player_id': result.get('player_id'),
+                                'trophies': result.get('trophies'),
+                                'registered_at': datetime.now(JST).isoformat(),
+                                'last_updated': datetime.now(JST).isoformat()
+                            }
+                            player_names[user_id_str] = player_data
+                            player_register_count[user_id_str] = 1
+                            save_player_names()
+                            
+                            # 新規登録のメッセージ
+                            await message.channel.send("お荷物プレイヤーを記録したよ！")
+                            print(f"✅ プロフィール新規登録: {message.author.name} → {player_name}")
+                    
+                    else:
+                        # 認識失敗（何もしない）
+                        print(f"⚠️ プロフィール認識失敗: {message.author.name}")
+                
+                # 最初の画像のみ処理
+                break
+        
+        # このチャンネルでは他の処理をスキップ
+        return
+    
     # フィーロちゃん呼びかけ検出
     firo_keywords = ["フィーロちゃん", "ふぃーろちゃん", "フィーロ", "ふぃーろ"]
     firo_called = any(normalize_text(k) in normalized for k in firo_keywords)
@@ -400,11 +470,20 @@ async def on_message(message: discord.Message):
             await message.reply("フィーロは、フィーロ！")
             return
     
+    # 🆕 管理者モード終了チェック（最優先）
+    if message.author.id == OWNER_ID and is_in_admin_mode(message.author.id):
+        exit_keywords = ["終了", "おわり", "終わり", "exit", "quit", "bye", "バイバイ", "またね", "さようなら", "帰って", "もういい", "閉じて"]
+        if any(normalize_text(k) in normalized for k in exit_keywords):
+            exit_admin_mode(message.author.id)
+            await message.reply("了解！またいつでも呼んでね！")
+            print(f"✅ 管理者モード終了（直接チェック）: {message.author.name}")
+            return
+    
     # 管理者モード中の処理
     if message.author.id == OWNER_ID and is_in_admin_mode(message.author.id):
         handled = await handle_admin_mode_command(message)
         if handled:
-            # 🔧 修正: まだ管理者モードにいる場合のみタイムスタンプ更新
+            # まだ管理者モードにいる場合のみタイムスタンプ更新
             if is_in_admin_mode(message.author.id):
                 update_admin_mode(message.author.id)
             return
@@ -443,6 +522,7 @@ async def on_message(message: discord.Message):
     # 「〇〇と検索して」パターンに反応（管理者モード外でも動作）
     if "と検索して" in message.content:
         await handle_search_request(message)
+
     
     # 「チャットを削除して」コマンド（管理者モード外でも動作、オーナーのみ）
     if message.author.id == OWNER_ID:
@@ -1298,6 +1378,224 @@ async def exit_command(interaction: discord.Interaction):
         await interaction.response.send_message("✅ 管理者モードを終了しました", ephemeral=True)
     else:
         await interaction.response.send_message("ℹ️ 管理者モードは起動していません", ephemeral=True)
+
+# ====== スラッシュコマンド /playerlist ======
+@bot.tree.command(name="playerlist", description="登録されているプレイヤー名一覧を表示")
+async def playerlist_command(interaction: discord.Interaction):
+    if not player_names:
+        await interaction.response.send_message("📋 登録されているプレイヤーはいません", ephemeral=True)
+        return
+    
+    embed = discord.Embed(
+        title="🎮 お荷物プレイヤー一覧",
+        color=discord.Color.blue()
+    )
+    
+    guild = interaction.guild
+    player_list = []
+    
+    # トロフィー数でソート
+    sorted_players = sorted(
+        player_names.items(),
+        key=lambda x: x[1].get('trophies', 0) if isinstance(x[1], dict) else 0,
+        reverse=True
+    )
+    
+    for user_id_str, player_data in sorted_players:
+        try:
+            user_id = int(user_id_str)
+            
+            # 古いデータ形式（文字列のみ）への対応
+            if isinstance(player_data, str):
+                bs_name = player_data
+                trophy_str = ""
+            else:
+                bs_name = player_data.get('name', 'Unknown')
+                trophies = player_data.get('trophies')
+                trophy_str = f" - 🏆 {trophies:,}" if trophies else ""
+            
+            # 登録回数を取得
+            count = player_register_count.get(user_id_str, 1)
+            count_str = f" (登録{count}回)" if count > 1 else ""
+            
+            if guild:
+                try:
+                    member = await guild.fetch_member(user_id)
+                    player_list.append(f"• **{bs_name}**{trophy_str}{count_str}\n  └ {member.mention}")
+                except:
+                    player_list.append(f"• **{bs_name}**{trophy_str}{count_str}")
+            else:
+                player_list.append(f"• **{bs_name}**{trophy_str}{count_str}")
+        except:
+            if isinstance(player_data, str):
+                player_list.append(f"• **{player_data}**")
+            else:
+                player_list.append(f"• **{player_data.get('name', 'Unknown')}**")
+    
+    embed.description = "\n".join(player_list) if player_list else "データなし"
+    embed.set_footer(text=f"合計: {len(player_names)}人")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+# ====== スラッシュコマンド /myprofile ======
+@bot.tree.command(name="myprofile", description="自分のブロスタプロフィールを確認")
+async def myprofile_command(interaction: discord.Interaction):
+    user_id_str = str(interaction.user.id)
+    
+    if user_id_str in player_names:
+        player_data = player_names[user_id_str]
+        count = player_register_count.get(user_id_str, 1)
+        
+        # 古いデータ形式への対応
+        if isinstance(player_data, str):
+            bs_name = player_data
+            embed = discord.Embed(
+                title="🎮 あなたのブロスタプロフィール",
+                color=discord.Color.blue()
+            )
+            embed.add_field(name="名前", value=f"**{bs_name}**", inline=False)
+        else:
+            bs_name = player_data.get('name', 'Unknown')
+            player_id = player_data.get('player_id')
+            trophies = player_data.get('trophies')
+            
+            embed = discord.Embed(
+                title="🎮 あなたのブロスタプロフィール",
+                color=discord.Color.blue()
+            )
+            embed.add_field(name="名前", value=f"**{bs_name}**", inline=False)
+            
+            if player_id:
+                embed.add_field(name="プレイヤーID", value=f"`{player_id}`", inline=True)
+            
+            if trophies:
+                embed.add_field(name="トロフィー", value=f"🏆 {trophies:,}", inline=True)
+            
+            embed.add_field(name="登録回数", value=f"{count}回", inline=True)
+            
+            if player_data.get('registered_at'):
+                from datetime import datetime as dt
+                registered = dt.fromisoformat(player_data['registered_at'])
+                embed.set_footer(text=f"初回登録: {registered.strftime('%Y/%m/%d')}")
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    else:
+        channel_ids = list(BRAWLSTARS_CHANNELS)
+        channels_str = " または ".join([f"<#{ch_id}>" for ch_id in channel_ids[:2]])
+        await interaction.response.send_message(
+            f"❌ ブロスタプロフィールが登録されていません\n"
+            f"{channels_str}でプロフィール画像を送信してください！",
+            ephemeral=True
+        )
+
+
+# ====== スラッシュコマンド /scanhistory ======
+@bot.tree.command(name="scanhistory", description="過去の画像を遡って一括登録（オーナーのみ）")
+@app_commands.describe(
+    channel="スキャンするチャンネル（省略時は現在のチャンネル）",
+    limit="遡るメッセージ数（デフォルト: 100、最大500）"
+)
+async def scanhistory_command(interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None, limit: int = 100):
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("このコマンドはオーナーのみが使用できます。", ephemeral=True)
+        return
+    
+    target_channel = channel or interaction.channel
+    
+    # 対象チャンネルかチェック
+    if target_channel.id not in BRAWLSTARS_CHANNELS:
+        channel_ids = list(BRAWLSTARS_CHANNELS)
+        channels_str = ", ".join([f"<#{ch_id}>" for ch_id in channel_ids])
+        await interaction.response.send_message(
+            f"❌ このコマンドは指定されたブロスタチャンネルでのみ使用できます。\n"
+            f"有効なチャンネル: {channels_str}",
+            ephemeral=True
+        )
+        return
+    
+    # 最大値チェック
+    if limit > 500:
+        limit = 500
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        start_time = datetime.now(JST)
+        
+        # メッセージ履歴を取得
+        messages_with_images = []
+        async for msg in target_channel.history(limit=limit):
+            if msg.author.bot:
+                continue
+            if msg.attachments:
+                for attachment in msg.attachments:
+                    if attachment.content_type and attachment.content_type.startswith('image/'):
+                        messages_with_images.append((msg, attachment))
+                        break  # 1メッセージにつき1画像のみ
+        
+        if not messages_with_images:
+            await interaction.followup.send("📋 画像が見つかりませんでした。")
+            return
+        
+        # 処理開始通知
+        await interaction.followup.send(f"🔍 {len(messages_with_images)}件の画像を検出しました。処理を開始します...")
+        
+        success_count = 0
+        existing_count = 0
+        failed_count = 0
+        
+        for msg, attachment in messages_with_images:
+            result = await extract_brawlstars_name(attachment.url)
+            
+            if result and result['name']:
+                player_name = result['name']
+                user_id_str = str(msg.author.id)
+                
+                # 既に登録されているかチェック
+                if user_id_str in player_names:
+                    existing_count += 1
+                    print(f"⏭️ スキップ: {msg.author.name} → {player_name} (既に登録済み)")
+                    continue
+                
+                # 新規登録
+                player_data = {
+                    'name': player_name,
+                    'player_id': result.get('player_id'),
+                    'trophies': result.get('trophies'),
+                    'registered_at': msg.created_at.isoformat(),
+                    'last_updated': msg.created_at.isoformat()
+                }
+                player_names[user_id_str] = player_data
+                player_register_count[user_id_str] = 1
+                success_count += 1
+                print(f"✅ 過去データ登録: {msg.author.name} → {player_name}")
+            else:
+                failed_count += 1
+                print(f"❌ 認識失敗: {msg.author.name} のメッセージ")
+        
+        # 保存
+        save_player_names()
+        
+        # 結果を報告
+        end_time = datetime.now(JST)
+        elapsed = int((end_time - start_time).total_seconds())
+        
+        result_embed = discord.Embed(
+            title="📊 過去データ一括登録完了",
+            color=discord.Color.green()
+        )
+        result_embed.add_field(name="✅ 新規登録", value=f"{success_count}人", inline=True)
+        result_embed.add_field(name="⏭️ スキップ", value=f"{existing_count}人", inline=True)
+        result_embed.add_field(name="❌ 認識失敗", value=f"{failed_count}枚", inline=True)
+        result_embed.add_field(name="📋 処理した画像", value=f"{len(messages_with_images)}枚", inline=False)
+        result_embed.set_footer(text=f"処理時間: {elapsed}秒")
+        
+        await interaction.followup.send(embed=result_embed)
+        
+    except Exception as e:
+        await interaction.followup.send(f"❌ エラーが発生しました: {e}")
+        print(f"❌ 一括登録エラー: {e}")
 
 
 # ====== スラッシュコマンド /ping ======
