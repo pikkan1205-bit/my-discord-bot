@@ -1549,20 +1549,17 @@ async def scanhistory_command(interaction: discord.Interaction, channel: Optiona
         existing_count = 0
         failed_count = 0
         
-        for msg, attachment in messages_with_images:
+                for msg, attachment in messages_with_images:
             result = await extract_brawlstars_name(attachment.url)
             
             if result and result['name']:
                 player_name = result['name']
                 user_id_str = str(msg.author.id)
                 
-                # 既に登録されているかチェック
-                if user_id_str in player_names:
-                    existing_count += 1
-                    print(f"⏭️ スキップ: {msg.author.name} → {player_name} (既に登録済み)")
-                    continue
+                # 新規かどうかの判定
+                is_new = user_id_str not in player_names
                 
-                # 新規登録
+                # データを最新（またはスキャンしたもの）に更新
                 player_data = {
                     'name': player_name,
                     'player_id': result.get('player_id'),
@@ -1571,12 +1568,22 @@ async def scanhistory_command(interaction: discord.Interaction, channel: Optiona
                     'last_updated': msg.created_at.isoformat()
                 }
                 player_names[user_id_str] = player_data
-                player_register_count[user_id_str] = 1
-                success_count += 1
-                print(f"✅ 過去データ登録: {msg.author.name} → {player_name}")
+                
+                if is_new:
+                    # 初めての登録
+                    player_register_count[user_id_str] = 1
+                    success_count += 1
+                    print(f"✅ 新規登録: {msg.author.name} → {player_name}")
+                else:
+                    # 2回目以降の登録（カウントを1増やす）
+                    current_count = player_register_count.get(user_id_str, 1)
+                    player_register_count[user_id_str] = current_count + 1
+                    existing_count += 1
+                    print(f"🔄 データ更新 & カウントアップ({current_count + 1}回): {msg.author.name} → {player_name}")
             else:
                 failed_count += 1
                 print(f"❌ 認識失敗: {msg.author.name} のメッセージ")
+
         
         # 保存
         save_player_names()
