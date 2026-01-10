@@ -344,7 +344,11 @@ async def run_daily_test(channel):
 @bot.event
 async def on_ready():
     load_config()
+    load_player_names()  # ← この行を追加
     await bot.tree.sync()
+    
+    # ... 残りのコードはそのまま
+
     
     # ステータスを設定
     activity = discord.Game(name="ブロスタ")
@@ -1631,6 +1635,157 @@ class HelpView(View):
 async def help_command(interaction: discord.Interaction):
     view = HelpView()
     await interaction.response.send_message(embed=view.pages[0], view=view, ephemeral=True)
+
+# ====== 画像認識機能 ======
+async def extract_text_from_image(image_url: str) -> Optional[str]:
+    """画像から文字を抽出"""
+    if not vision_client:
+        return None
+    
+    try:
+        # 画像をダウンロード
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.get(image_url) as response:
+                if response.status != 200:
+                    return None
+                image_data = await response.read()
+        
+        # Vision APIで文字認識
+        image = vision.Image(content=image_data)
+        response = vision_client.text_detection(image=image)
+        texts = response.text_annotations
+        
+        if texts:
+            # 最初の要素が全体のテキスト
+            return texts[0].description
+        return None
+        
+    except Exception as e:
+        print(f"❌ 画像認識エラー: {e}")
+        return None
+
+
+async def extract_brawlstars_name(image_url: str) -> Optional[dict]:
+    """ブロスタのプロフィール画像から名前とIDを抽出"""
+    text = await extract_text_from_image(image_url)
+    
+    if not text:
+        return None
+    
+    lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
+    
+    result = {
+        'name': None,
+        'player_id': None,
+        'trophies': None
+    }
+    
+    # デバッグ用：認識された全テキストを出力
+    print(f"🔍 認識テキスト:\n{text}\n")
+    
+    # パターン1: 「プロフィール」の次の行が名前
+    for i, line in enumerate(lines):
+        if 'プロフィール' in line or 'PROFILE' in line.upper():
+            # 次の行をチェック（アイコン行をスキップ）
+            for j in range(i+1, min(i+4, len(lines))):
+                next_line = lines[j].strip()
+                # 名前の可能性が高い行の条件
+                if (len(next_line) >= 2 and 
+                    'キャラクター' not in next_line and
+                    'CHARACTER' not in next_line.upper() and
+                    not next_line.startswith('#') and
+                    not next_line.replace(',', '').isdigit()):
+                    result['name'] = next_line
+                    print(f"✅ 名前検出（パターン1）: {next_line}")
+                    break
+            break
+    
+    # パターン2: プレイヤーIDの前の行が名前
+    if not result['name']:
+        for i, line in enumerate(lines):
+            # プレイヤーID（#から始まる）を探す
+            if line.startswith('#') and len(line) > 5:
+                result['player_id'] = line
+                # 前の行が名前
+                if i > 0:
+                    prev_line = lines[i-1].strip()
+                    if len(prev_line) >= 2:
+                        result['name'] = prev_line
+                        print(f"✅ 名前検出（パターン2）: {prev_line}")
+                break
+    
+    # パターン3: DreamerAikosuのようなIDの前が名前
+    if not result['name']:
+        for i, line in enumerate(lines):
+            # 英数字のみのID（プレイヤー名の下に表示される）
+            if (line.replace('_', '').replace('-', '').isalnum() and 
+                len(line) >= 5 and 
+                any(c.isalpha() for c in line)):
+                result['player_id'] = line
+                # 前の行が名前
+                if i > 0:
+                    prev_line = lines[i-1].strip()
+                    # 名前の可能性が高い（絵文字や多言語文字を含む）
+                    if len(prev_line) >= 2 and prev_line != 'プロフィール':
+                        result['name'] = prev_line
+                        print(f"✅ 名前検出（パターン3）: {prev_line}")
+                break
+    
+    # トロフィー数も抽出（オプション）
+    for i, line in enumerate(lines):
+        if 'トロフィー' in line or 'TROPHIES' in line.upper():
+            # 次の行が数字
+            if i+1 < len(lines):
+                trophy_line = lines[i+1].replace(',', '').strip()
+                if trophy_line.isdigit():
+                    result['trophies'] = int(trophy_line)
+                    print(f"🏆 トロフィー: {result['trophies']}")
+            break
+    
+    return result if result['name'] else None
+
+
+def save_player_names():
+    """プレイヤー名をJSONに保存"""
+    global player_names, player_register_count
+    try:
+        data = {
+            'players': player_names,
+            'counts': player_register_count
+        }
+        with open(PLAYER_NAMES_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        print(f"💾 プレイヤー名を保存しました")
+    except Exception as e:
+        print(f"❌ プレイヤー名保存エラー: {e}")
+
+
+def load_player_names():
+    """プレイヤー名をJSONから読み込み"""
+    global player_names, player_register_count
+    try:
+        if os.path.exists(PLAYER_NAMES_FILE):
+            with open(PLAYER_NAMES_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            # 新形式（players, counts）
+            if isinstance(data, dict) and 'players' in data:
+                player_names = data.get('players', {})
+                player_register_count = data.get('counts', {})
+            # 旧形式（互換性のため）
+            else:
+                player_names = data
+                player_register_count = {}
+            
+            print(f"📂 プレイヤー名を読み込みました: {len(player_names)}人")
+        else:
+            player_names = {}
+            player_register_count = {}
+    except Exception as e:
+        print(f"❌ プレイヤー名読み込みエラー: {e}")
+        player_names = {}
+        player_register_count = {}
 
 
 # ====== VC監視処理 ======
