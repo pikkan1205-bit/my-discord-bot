@@ -398,6 +398,9 @@ async def on_ready():
 async def on_message(message: discord.Message):
     if message.author.bot:
         return
+
+    content = message.content
+    normalized = normalize_text(content)
     
     # ====== ブロスタプロフィール画像認識（指定チャンネルのみ） ======
     if message.channel.id in BRAWLSTARS_CHANNELS and message.attachments:
