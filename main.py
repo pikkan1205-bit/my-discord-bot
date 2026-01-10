@@ -9,6 +9,10 @@ import re
 from datetime import datetime, timezone, timedelta, time
 import json
 from googleapiclient.discovery import build
+from google.cloud import vision  # ← 追加
+from google.oauth2 import service_account  # ← 追加
+import io  # ← 追加
+import json as json_lib  # ← 追加
 
 # ====== Intents 設定 ======
 intents = discord.Intents.default()
@@ -31,22 +35,94 @@ if GOOGLE_API_KEY and GOOGLE_CSE_ID:
     except Exception as e:
         print(f"❌ Google検索API初期化失敗: {e}")
 
-# ====== 設定ここだけ書き換える ======
-OWNER_ID = 1163117069173272576  # あなたのID
+# ====== Google Vision API設定 ======
+vision_client = None
+try:
+    # 環境変数からJSONを読み込む方法
+    credentials_json = os.environ.get("GOOGLE_VISION_CREDENTIALS_JSON")
+    if credentials_json:
+        credentials_dict = json_lib.loads(credentials_json)
+        credentials = service_account.Credentials.from_service_account_info(credentials_dict)
+        vision_client = vision.ImageAnnotatorClient(credentials=credentials)
+        print("✅ Google Vision API初期化完了")
+    # または、ファイルパスから読み込む方法
+    elif os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+        vision_client = vision.ImageAnnotatorClient()
+        print("✅ Google Vision API初期化完了")
+    else:
+        print("⚠️ Google Vision API未設定（画像認識機能は無効）")
+except Exception as e:
+    print(f"❌ Google Vision API初期化失敗: {e}")
+
+        
+# Google Custom Search サービス初期化
+google_service = None
+if GOOGLE_API_KEY and GOOGLE_CSE_ID:
+    try:
+        google_service = build("customsearch", "v1", developerKey=GOOGLE_API_KEY)
+        print("✅ Google検索API初期化完了")
+    except Exception as e:
+        print(f"❌ Google検索API初期化失敗: {e}")
+
+# ====== 環境変数から設定を読み込み ======
+# オーナーID（必須）
+OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
+if OWNER_ID == 0:
+    print("❌ エラー: OWNER_ID環境変数が設定されていません")
+    exit(1)
 
 # 初期管理者（オーナーのみ）
 ADMIN_IDS = set()
 
-# 初期対象ユーザー（複数可）
-BLOCKED_USERS = {
-    778146015571345418,  # 人①
-    991272401293811753,  # 人②
+# 初期対象ユーザー（カンマ区切りで複数指定可能）
+blocked_str = os.environ.get("INITIAL_BLOCKED_USERS", "")
+if blocked_str:
+    try:
+        BLOCKED_USERS = set(int(x.strip()) for x in blocked_str.split(",") if x.strip())
+        print(f"📋 初期ブロックユーザー: {len(BLOCKED_USERS)}人")
+    except ValueError as e:
+        print(f"⚠️ INITIAL_BLOCKED_USERS の形式エラー: {e}")
+        BLOCKED_USERS = set()
+else:
+    BLOCKED_USERS = set()
+
+# 初期対象VC（カンマ区切りで複数指定可能）
+vc_str = os.environ.get("INITIAL_TARGET_VCS", "")
+if vc_str:
+    try:
+        TARGET_VC_IDS = set(int(x.strip()) for x in vc_str.split(",") if x.strip())
+        print(f"📋 初期対象VC: {len(TARGET_VC_IDS)}個")
+    except ValueError as e:
+        print(f"⚠️ INITIAL_TARGET_VCS の形式エラー: {e}")
+        TARGET_VC_IDS = set()
+else:
+    TARGET_VC_IDS = set()
+
+# VCブロック機能の初期状態
+vc_block_enabled = True
+
+# 自動pingを送信するチャンネルID（0の場合は無効）
+AUTO_PING_CHANNEL_ID = int(os.environ.get("AUTO_PING_CHANNEL_ID", "0"))
+
+# データ永続化用ファイル
+CONFIG_FILE = "vcblock_config.json"
+
+# ====== ブロスタプロフィール認識用の設定 ======
+# プレイヤー名を保存する辞書
+player_names = {}  # {user_id: player_data}
+player_register_count = {}  # {user_id: count} 登録回数
+
+# 画像認識を有効にするチャンネルID
+BRAWLSTARS_CHANNELS = {
+    1379353245658648717,
+    1445382523449376911
 }
 
-# 初期対象VC（複数可）
-TARGET_VC_IDS = {
-    1311666056124825691,
-}
+# データ永続化用ファイル
+PLAYER_NAMES_FILE = "player_names.json"
+
+# ===================================
+
 
 # VC自動切断機能の初期状態
 vc_block_enabled = True  # 初期ON
