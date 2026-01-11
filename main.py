@@ -333,27 +333,42 @@ async def run_daily_test(channel):
         print(f"❌ 自動テスト送信失敗: {e}")
 
 
-@bot.event
-    # --- 名前候補を表示するための関数 ---
+# --- 名前候補を表示するための関数 ---
 async def name_autocomplete(
     interaction: discord.Interaction,
     current: str,
 ) -> list[app_commands.Choice[str]]:
+    # 登録されている名前の中から、入力中の文字が含まれるものを最大25件抽出
+    choices = [
+        app_commands.Choice(name=name, value=name)
+        for name in player_names.keys() if current.lower() in name.lower()
+    ]
+    return choices[:25]
 
+@bot.event
 async def on_ready():
+    global is_bot_initialized
+    # すでに初期化済みなら何もしない（2重通知防止）
+    if is_bot_initialized:
+        return
+
     load_config()
     load_player_names()
-    await bot.tree.sync()
+    
+    # コマンドの同期
+    try:
+        await bot.tree.sync()
+        print(f"Synced commands.")
+    except Exception as e:
+        print(f"Failed to sync: {e}")
     
     # ステータスを設定
     activity = discord.Game(name="ブロスタ")
     await bot.change_presence(activity=activity)
     
-    # 自動pingタスクを開始
+    # ループタスクの開始
     if not daily_ping.is_running():
         daily_ping.start()
-    
-    # 管理者モードタイムアウトチェックを開始
     if not check_admin_mode_timeout.is_running():
         check_admin_mode_timeout.start()
     
@@ -372,36 +387,6 @@ async def on_ready():
         await owner.send(embed=embed)
     except Exception as e:
         print(f"❌ 起動メッセージ送信失敗: {e}")
-
-    
-    # ステータスを設定
-    activity = discord.Game(name="ブロスタ")
-    await bot.change_presence(activity=activity)
-    
-    # 自動pingタスクを開始
-    if not daily_ping.is_running():
-        daily_ping.start()
-    
-    # 管理者モードタイムアウトチェックを開始
-    if not check_admin_mode_timeout.is_running():
-        check_admin_mode_timeout.start()
-    
-    print(f"ログイン成功: {bot.user}")
-    
-    # 起動完了メッセージをオーナーにDM送信
-    try:
-        owner = await bot.fetch_user(OWNER_ID)
-        current_time = datetime.now(JST).strftime("%Y年%m月%d日 %H:%M:%S")
-        embed = discord.Embed(
-            title="✅ 起動完了",
-            description=f"ボットが正常に起動しました。",
-            color=discord.Color.green()
-        )
-        embed.set_footer(text=f"起動時刻: {current_time}")
-        await owner.send(embed=embed)
-    except Exception as e:
-        print(f"❌ 起動メッセージ送信失敗: {e}")
-
 
 @bot.event
 async def on_message(message: discord.Message):
