@@ -114,6 +114,11 @@ PLAYER_NAMES_FILE = "player_names.json"
 # --- 115行目あたりに追加 ---
 last_list_message = None  # 更新対象のメッセージを保存する変数
 
+is_bot_initialized = False # 起動処理が終わったかどうかの旗
+
+
+
+
 # ===================================
 
 # ====== 認可チェック関数 ======
@@ -387,6 +392,10 @@ async def on_ready():
         await owner.send(embed=embed)
     except Exception as e:
         print(f"❌ 起動メッセージ送信失敗: {e}")
+
+    # 初期化完了
+    is_bot_initialized = True
+
 
 @bot.event
 async def on_message(message: discord.Message):
