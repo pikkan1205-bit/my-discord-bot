@@ -332,13 +332,14 @@ async def run_daily_test(channel):
     except Exception as e:
         print(f"❌ 自動テスト送信失敗: {e}")
 
+
+@bot.event
     # --- 名前候補を表示するための関数 ---
 async def name_autocomplete(
     interaction: discord.Interaction,
     current: str,
 ) -> list[app_commands.Choice[str]]:
 
-@bot.event
 async def on_ready():
     load_config()
     load_player_names()
