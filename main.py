@@ -111,7 +111,14 @@ BRAWLSTARS_CHANNELS = {
 # データ永続化用ファイル
 PLAYER_NAMES_FILE = "player_names.json"
 
+# ====== プレイヤーリスト自動更新設定 ======
+PLAYERLIST_CHANNEL_ID = 1459797964091428937  # 自動更新するチャンネルID
+playerlist_message_id = None  # 現在のリストメッセージID
+last_update_time = {}  # {user_id: timestamp} クールタイム管理用
+UPDATE_COOLDOWN = 15  # 更新ボタンのクールタイム（秒）
+
 # ===================================
+
 
 # ====== 認可チェック関数 ======
 def is_authorized(user_id: int) -> bool:
