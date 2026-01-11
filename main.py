@@ -424,6 +424,8 @@ async def on_message(message: discord.Message):
                             # データの更新
                             player_names[player_name]['last_updated'] = datetime.now(JST).isoformat()
                             save_player_names()
+
+                            await update_latest_list ()
                             
                             await message.channel.send(f"「{player_name}」は既に追加されてるよ！通算{count}回目だね")
                             print(f"🔄 報告カウントアップ: {player_name} ({count}回目)")
@@ -437,7 +439,7 @@ async def on_message(message: discord.Message):
                             }
                             player_register_count[player_name] = 1
                             save_player_names()
-                            
+                            await update_latest_list ()
                             await message.channel.send(f"お荷物プレイヤー「{player_name}」を新しく記録したよ！")
                             print(f"✅ 新規名前登録: {player_name}")
                     else:
@@ -1385,9 +1387,19 @@ async def exit_command(interaction: discord.Interaction):
 # ====== スラッシュコマンド /playerlist ======
 @bot.tree.command(name="playerlist", description="登録されているお荷物プレイヤー一覧を表示")
 async def playerlist_command(interaction: discord.Interaction):
+    global last_list_message
     if not player_names:
         await interaction.response.send_message("📋 登録されているプレイヤーはいません", ephemeral=False)
         return
+    
+    view = PlayerListPagination()
+    embed = view.create_player_list_embed()
+    
+    await interaction.response.send_message(embed=embed, view=view)
+    
+    # このメッセージを自動更新のターゲットにする
+    last_list_message = await interaction.original_response()
+
     
     embed = discord.Embed(
         title="🎮 お荷物プレイヤーリスト",
