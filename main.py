@@ -448,13 +448,6 @@ async def on_message(message: discord.Message):
         return
 
 
-    # 登録されている名前の中から、入力中の文字が含まれるものを最大25件抽出
-    choices = [
-        app_commands.Choice(name=name, value=name)
-        for name in player_names.keys() if current.lower() in name.lower()
-    ]
-    return choices[:25]
-
     # ... (これ以降に「フィーロちゃん」呼びかけや管理者モードのコードを続ける) ...
 
     
@@ -1391,10 +1384,12 @@ async def playerlist_command(interaction: discord.Interaction):
     view = PlayerListPagination()
     embed = view.create_player_list_embed()
     
+    # ✅ 返信はこれ「1回」だけにします！
     await interaction.response.send_message(embed=embed, view=view)
     
-    # このメッセージを自動更新のターゲットにする
+    # 返信したメッセージを保存（自動更新に必要）
     last_list_message = await interaction.original_response()
+
 
     
     embed = discord.Embed(
