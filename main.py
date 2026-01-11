@@ -332,6 +332,11 @@ async def run_daily_test(channel):
     except Exception as e:
         print(f"❌ 自動テスト送信失敗: {e}")
 
+    # --- 名前候補を表示するための関数 ---
+async def name_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
 
 @bot.event
 async def on_ready():
@@ -447,11 +452,7 @@ async def on_message(message: discord.Message):
                 break # 最初の1枚のみ処理
         return
 
-    # --- 名前候補を表示するための関数 ---
-async def name_autocomplete(
-    interaction: discord.Interaction,
-    current: str,
-) -> list[app_commands.Choice[str]]:
+
     # 登録されている名前の中から、入力中の文字が含まれるものを最大25件抽出
     choices = [
         app_commands.Choice(name=name, value=name)
