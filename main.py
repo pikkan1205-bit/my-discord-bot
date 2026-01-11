@@ -1977,6 +1977,64 @@ async def extract_text_from_image(image_url: str) -> Optional[str]:
         print(f"❌ 画像認識エラー: {e}")
         return None
 
+#ボタンと更新用関数の追加
+class PlayerListPagination(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="リストを更新", style=discord.ButtonStyle.green, emoji="🔄")
+    async def refresh_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        global last_list_message
+        if not player_names:
+            await interaction.response.edit_message(content="📋 登録されているプレイヤーはいません", embed=None, view=None)
+            return
+        embed = self.create_player_list_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+        last_list_message = interaction.message # ボタンを押したメッセージを最新の監視対象にする
+
+    def create_player_list_embed(self):
+        # 安全なソート処理
+        def get_count(name):
+            val = player_register_count.get(name)
+            return val if isinstance(val, int) else 0
+
+        sorted_players = sorted(
+            player_names.keys(),
+            key=get_count,
+            reverse=True
+        )
+
+        player_list = []
+        for name in sorted_players:
+            count = player_register_count.get(name, 1)
+            player_list.append(f"• **{name}** — `{count}回報告`")
+
+        description_text = "\n".join(player_list) if player_list else "登録者はまだいません。"
+        if len(description_text) > 4000:
+            description_text = description_text[:3997] + "..."
+
+        embed = discord.Embed(
+            title="🎮 お荷物プレイヤーリスト",
+            description=description_text,
+            color=discord.Color.red()
+        )
+        embed.set_footer(text=f"合計: {len(player_names)}人 | 最終更新: {datetime.now(JST).strftime('%H:%M:%S')}")
+        return embed
+
+async def update_latest_list():
+    """登録があった時にリストを自動で書き換える関数"""
+    global last_list_message
+    if last_list_message and player_names:
+        try:
+            view = PlayerListPagination()
+            embed = view.create_player_list_embed()
+            embed.set_footer(text=f"{embed.footer.text} (自動更新済み)")
+            await last_list_message.edit(embed=embed, view=view)
+            print("✨ リストを自動更新しました")
+        except Exception as e:
+            print(f"⚠️ 自動更新失敗: {e}")
+            last_list_message = None
+
 
 async def extract_brawlstars_name(image_url: str) -> Optional[dict]:
     """ブロスタのプロフィール画像から名前とIDを抽出"""
