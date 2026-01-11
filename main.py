@@ -111,6 +111,9 @@ BRAWLSTARS_CHANNELS = {
 # データ永続化用ファイル
 PLAYER_NAMES_FILE = "player_names.json"
 
+# --- 115行目あたりに追加 ---
+last_list_message = None  # 更新対象のメッセージを保存する変数
+
 # ===================================
 
 # ====== 認可チェック関数 ======
