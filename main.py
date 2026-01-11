@@ -445,8 +445,26 @@ async def on_ready():
 async def on_message(message: discord.Message):
     if message.author.bot:
         return
-
-                            if is_already_registered:
+    
+    content = message.content
+    normalized = normalize_text(content)
+    
+    # ====== ブロスタプロフィール画像認識（指定チャンネルのみ） ======
+    if message.channel.id in BRAWLSTARS_CHANNELS and message.attachments:
+        for attachment in message.attachments:
+            # 画像ファイルかチェック
+            if attachment.content_type and attachment.content_type.startswith('image/'):
+                async with message.channel.typing():
+                    result = await extract_brawlstars_name(attachment.url)
+                    
+                    if result and result['name']:
+                        player_name = result['name']
+                        user_id_str = str(message.author.id)
+                        
+                        # 既に登録されているかチェック
+                        is_already_registered = user_id_str in player_names
+                        
+                        if is_already_registered:
                             # 登録回数をインクリメント
                             player_register_count[user_id_str] = player_register_count.get(user_id_str, 1) + 1
                             count = player_register_count[user_id_str]
@@ -474,44 +492,20 @@ async def on_message(message: discord.Message):
                                     print(f"🔄 再登録によるリスト即時更新完了")
                             except Exception as e:
                                 print(f"⚠️ リスト即時更新失敗: {e}")
-
-
-    content = message.content
-    normalized = normalize_text(content)
-    
-    # ====== ブロスタプロフィール画像認識（指定チャンネルのみ） ======
-    if message.channel.id in BRAWLSTARS_CHANNELS and message.attachments:
-        for attachment in message.attachments:
-            if attachment.content_type and attachment.content_type.startswith('image/'):
-                async with message.channel.typing():
-                    result = await extract_brawlstars_name(attachment.url)
-                    
-                    if result and result['name']:
-                        player_name = result['name']
-                        
-                        # 名前がすでに登録されているかチェック
-                        if player_name in player_names:
-                            # 登録回数を増やす
-                            player_register_count[player_name] = player_register_count.get(player_name, 0) + 1
-                            count = player_register_count[player_name]
-                            
-                            # データの更新
-                            player_names[player_name]['last_updated'] = datetime.now(JST).isoformat()
-                            save_player_names()
-                            
-                            await message.channel.send(f"「{player_name}」は既に追加されてるよ！通算{count}回目だね")
-                            print(f"🔄 報告カウントアップ: {player_name} ({count}回目)")
                         
                         else:
                             # 新規登録
-                            player_names[player_name] = {
+                            player_data = {
                                 'name': player_name,
+                                'player_id': result.get('player_id'),
+                                'trophies': result.get('trophies'),
                                 'registered_at': datetime.now(JST).isoformat(),
                                 'last_updated': datetime.now(JST).isoformat()
                             }
-                            player_register_count[player_name] = 1
+                            player_names[user_id_str] = player_data
+                            player_register_count[user_id_str] = 1
                             save_player_names()
-
+                            
                             # 新規登録のメッセージ
                             await message.channel.send("お荷物プレイヤーを記録したよ！")
                             print(f"✅ プロフィール新規登録: {message.author.name} → {player_name}")
@@ -527,28 +521,16 @@ async def on_message(message: discord.Message):
                                     print(f"🔄 新規登録によるリスト即時更新完了")
                             except Exception as e:
                                 print(f"⚠️ リスト即時更新失敗: {e}")
-                            
-                            await message.channel.send(f"お荷物プレイヤー「{player_name}」を新しく記録したよ！")
-                            print(f"✅ 新規名前登録: {player_name}")
+                    
                     else:
+                        # 認識失敗（何もしない）
                         print(f"⚠️ プロフィール認識失敗: {message.author.name}")
-                break # 最初の1枚のみ処理
+                
+                # 最初の画像のみ処理
+                break
+        
+        # このチャンネルでは他の処理をスキップ
         return
-
-    # --- 名前候補を表示するための関数 ---
-async def name_autocomplete(
-    interaction: discord.Interaction,
-    current: str,
-) -> list[app_commands.Choice[str]]:
-    # 登録されている名前の中から、入力中の文字が含まれるものを最大25件抽出
-    choices = [
-        app_commands.Choice(name=name, value=name)
-        for name in player_names.keys() if current.lower() in name.lower()
-    ]
-    return choices[:25]
-
-    # ... (これ以降に「フィーロちゃん」呼びかけや管理者モードのコードを続ける) ...
-
     
     # フィーロちゃん呼びかけ検出
     firo_keywords = ["フィーロちゃん", "ふぃーろちゃん", "フィーロ", "ふぃーろ"]
@@ -615,7 +597,6 @@ async def name_autocomplete(
     # 「〇〇と検索して」パターンに反応（管理者モード外でも動作）
     if "と検索して" in message.content:
         await handle_search_request(message)
-
     
     # 「チャットを削除して」コマンド（管理者モード外でも動作、オーナーのみ）
     if message.author.id == OWNER_ID:
@@ -628,6 +609,7 @@ async def name_autocomplete(
                     await message.channel.purge(limit=limit + 1)
                     await message.channel.send("お掃除完了！綺麗になったね！", delete_after=5)
                     return
+
 
 
 def normalize_synonyms(text: str) -> str:
