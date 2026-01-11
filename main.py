@@ -111,14 +111,7 @@ BRAWLSTARS_CHANNELS = {
 # データ永続化用ファイル
 PLAYER_NAMES_FILE = "player_names.json"
 
-# ====== プレイヤーリスト自動更新設定 ======
-PLAYERLIST_CHANNEL_ID = 1459797964091428937  # 自動更新するチャンネルID
-playerlist_message_id = None  # 現在のリストメッセージID
-last_update_time = {}  # {user_id: timestamp} クールタイム管理用
-UPDATE_COOLDOWN = 15  # 更新ボタンのクールタイム（秒）
-
 # ===================================
-
 
 # ====== 認可チェック関数 ======
 def is_authorized(user_id: int) -> bool:
@@ -336,41 +329,6 @@ async def run_daily_test(channel):
     except Exception as e:
         print(f"❌ 自動テスト送信失敗: {e}")
 
-# ====== プレイヤーリスト自動更新タスク（5分ごと） ======
-@tasks.loop(minutes=5)
-async def update_playerlist():
-    """5分ごとにプレイヤーリストを自動更新"""
-    global playerlist_message_id
-    
-    try:
-        channel = bot.get_channel(PLAYERLIST_CHANNEL_ID)
-        if channel is None:
-            print(f"⚠️ プレイヤーリストチャンネルが見つかりません (ID: {PLAYERLIST_CHANNEL_ID})")
-            return
-        
-        embed = await create_playerlist_embed()
-        view = PlayerListView()
-        
-        if playerlist_message_id:
-            # 既存のメッセージを更新
-            try:
-                message = await channel.fetch_message(playerlist_message_id)
-                await message.edit(embed=embed, view=view)
-                print(f"🔄 プレイヤーリスト自動更新完了 [{datetime.now(JST).strftime('%H:%M:%S')}]")
-            except discord.NotFound:
-                # メッセージが削除されていた場合、新規作成
-                print(f"⚠️ 既存のリストメッセージが見つかりません。新規作成します。")
-                message = await channel.send(embed=embed, view=view)
-                playerlist_message_id = message.id
-        else:
-            # 初回または未設定の場合、新規作成
-            message = await channel.send(embed=embed, view=view)
-            playerlist_message_id = message.id
-            print(f"✅ プレイヤーリスト初回作成完了 (ID: {playerlist_message_id})")
-            
-    except Exception as e:
-        print(f"❌ プレイヤーリスト自動更新エラー: {e}")
-
 
 @bot.event
 async def on_ready():
@@ -390,10 +348,6 @@ async def on_ready():
     if not check_admin_mode_timeout.is_running():
         check_admin_mode_timeout.start()
     
-    # プレイヤーリスト自動更新タスクを開始  ← ここに追加
-    if not update_playerlist.is_running():
-        update_playerlist.start()
-    
     print(f"ログイン成功: {bot.user}")
     
     # 起動完了メッセージをオーナーにDM送信
@@ -409,7 +363,6 @@ async def on_ready():
         await owner.send(embed=embed)
     except Exception as e:
         print(f"❌ 起動メッセージ送信失敗: {e}")
-
 
     
     # ステータスを設定
@@ -445,94 +398,51 @@ async def on_ready():
 async def on_message(message: discord.Message):
     if message.author.bot:
         return
-    
+
     content = message.content
     normalized = normalize_text(content)
     
     # ====== ブロスタプロフィール画像認識（指定チャンネルのみ） ======
     if message.channel.id in BRAWLSTARS_CHANNELS and message.attachments:
         for attachment in message.attachments:
-            # 画像ファイルかチェック
             if attachment.content_type and attachment.content_type.startswith('image/'):
                 async with message.channel.typing():
                     result = await extract_brawlstars_name(attachment.url)
                     
                     if result and result['name']:
                         player_name = result['name']
-                        user_id_str = str(message.author.id)
                         
-                        # 既に登録されているかチェック
-                        is_already_registered = user_id_str in player_names
-                        
-                        if is_already_registered:
-                            # 登録回数をインクリメント
-                            player_register_count[user_id_str] = player_register_count.get(user_id_str, 1) + 1
-                            count = player_register_count[user_id_str]
+                        # 名前がすでに登録されているかチェック
+                        if player_name in player_names:
+                            # 登録回数を増やす
+                            player_register_count[player_name] = player_register_count.get(player_name, 0) + 1
+                            count = player_register_count[player_name]
                             
-                            # 既存データを更新
-                            if isinstance(player_names[user_id_str], dict):
-                                player_names[user_id_str]['name'] = player_name
-                                player_names[user_id_str]['trophies'] = result.get('trophies')
-                                player_names[user_id_str]['last_updated'] = datetime.now(JST).isoformat()
-                            
+                            # データの更新
+                            player_names[player_name]['last_updated'] = datetime.now(JST).isoformat()
                             save_player_names()
                             
-                            # 既に追加済みのメッセージ
-                            await message.channel.send(f"お荷物は既に追加されてるよ！{count}回目だね")
-                            print(f"🔄 プロフィール再登録: {message.author.name} → {player_name} ({count}回目)")
-                            
-                            # ====== プレイヤーリストを即時更新 ======
-                            try:
-                                channel = bot.get_channel(PLAYERLIST_CHANNEL_ID)
-                                if channel and playerlist_message_id:
-                                    message_obj = await channel.fetch_message(playerlist_message_id)
-                                    embed = await create_playerlist_embed()
-                                    view = PlayerListView()
-                                    await message_obj.edit(embed=embed, view=view)
-                                    print(f"🔄 再登録によるリスト即時更新完了")
-                            except Exception as e:
-                                print(f"⚠️ リスト即時更新失敗: {e}")
+                            await message.channel.send(f"「{player_name}」は既に追加されてるよ！通算{count}回目だね")
+                            print(f"🔄 報告カウントアップ: {player_name} ({count}回目)")
                         
                         else:
                             # 新規登録
-                            player_data = {
+                            player_names[player_name] = {
                                 'name': player_name,
-                                'player_id': result.get('player_id'),
-                                'trophies': result.get('trophies'),
                                 'registered_at': datetime.now(JST).isoformat(),
                                 'last_updated': datetime.now(JST).isoformat()
                             }
-                            player_names[user_id_str] = player_data
-                            player_register_count[user_id_str] = 1
+                            player_register_count[player_name] = 1
                             save_player_names()
                             
-                            # 新規登録のメッセージ
-                            await message.channel.send("お荷物プレイヤーを記録したよ！")
-                            print(f"✅ プロフィール新規登録: {message.author.name} → {player_name}")
-                            
-                            # ====== プレイヤーリストを即時更新 ======
-                            try:
-                                channel = bot.get_channel(PLAYERLIST_CHANNEL_ID)
-                                if channel and playerlist_message_id:
-                                    message_obj = await channel.fetch_message(playerlist_message_id)
-                                    embed = await create_playerlist_embed()
-                                    view = PlayerListView()
-                                    await message_obj.edit(embed=embed, view=view)
-                                    print(f"🔄 新規登録によるリスト即時更新完了")
-                            except Exception as e:
-                                print(f"⚠️ リスト即時更新失敗: {e}")
-                    
+                            await message.channel.send(f"お荷物プレイヤー「{player_name}」を新しく記録したよ！")
+                            print(f"✅ 新規名前登録: {player_name}")
                     else:
-                        # 認識失敗（何もしない）
                         print(f"⚠️ プロフィール認識失敗: {message.author.name}")
-                
-                # 最初の画像のみ処理
-                break
-        
-        # このチャンネルでは他の処理をスキップ
+                break # 最初の1枚のみ処理
         return
 
-        # --- 名前候補を表示するための関数 ---
+    # --- 名前候補を表示するための関数 ---
 async def name_autocomplete(
     interaction: discord.Interaction,
     current: str,
@@ -544,6 +454,7 @@ async def name_autocomplete(
     ]
     return choices[:25]
 
+    # ... (これ以降に「フィーロちゃん」呼びかけや管理者モードのコードを続ける) ...
 
     
     # フィーロちゃん呼びかけ検出
@@ -611,6 +522,7 @@ async def name_autocomplete(
     # 「〇〇と検索して」パターンに反応（管理者モード外でも動作）
     if "と検索して" in message.content:
         await handle_search_request(message)
+
     
     # 「チャットを削除して」コマンド（管理者モード外でも動作、オーナーのみ）
     if message.author.id == OWNER_ID:
@@ -623,7 +535,6 @@ async def name_autocomplete(
                     await message.channel.purge(limit=limit + 1)
                     await message.channel.send("お掃除完了！綺麗になったね！", delete_after=5)
                     return
-
 
 
 def normalize_synonyms(text: str) -> str:
@@ -1656,32 +1567,6 @@ async def scanhistory_command(interaction: discord.Interaction, channel: Optiona
         await interaction.followup.send(f"❌ エラーが発生しました: {e}")
         print(f"❌ 一括登録エラー: {e}")
 
-        # 保存
-        save_player_names()
-        
-        # ====== プレイヤーリストを即時更新 ======
-        try:
-            list_channel = bot.get_channel(PLAYERLIST_CHANNEL_ID)
-            if list_channel and playerlist_message_id:
-                list_message = await list_channel.fetch_message(playerlist_message_id)
-                list_embed = await create_playerlist_embed()
-                list_view = PlayerListView()
-                await list_message.edit(embed=list_embed, view=list_view)
-                print(f"🔄 一括登録によるリスト即時更新完了")
-        except Exception as e:
-            print(f"⚠️ リスト即時更新失敗: {e}")
-        
-        # 結果を報告
-        end_time = datetime.now(JST)
-        elapsed = int((end_time - start_time).total_seconds())
-        
-        result_embed = discord.Embed(
-            title="📊 過去データ一括登録完了",
-            color=discord.Color.green()
-        )
-        # ... 残りのコード
-
-
 # ====== スラッシュコマンド /player_edit (名前の修正) ======
 @bot.tree.command(name="player_edit", description="登録されたプレイヤー名を修正します（オーナーのみ）")
 @app_commands.describe(old_name="修正したい現在の名前（候補から選択可）", new_name="正しい名前")
@@ -1916,95 +1801,6 @@ async def autoping_command(interaction: discord.Interaction, action: str, channe
                 await interaction.response.send_message(f"📋 自動ping: **有効** - {ch.mention} (毎日0時)", ephemeral=True)
             else:
                 await interaction.response.send_message(f"📋 自動ping: **有効** - ID: {AUTO_PING_CHANNEL_ID} (毎日0時)", ephemeral=True)
-                
-# ====== プレイヤーリスト用View（更新ボタン付き） ======
-class PlayerListView(View):
-    def __init__(self):
-        super().__init__(timeout=None)  # タイムアウトなし（常時有効）
-    
-    @discord.ui.button(label="🔄 更新", style=discord.ButtonStyle.primary, custom_id="refresh_playerlist")
-    async def refresh_button(self, interaction: discord.Interaction, button: Button):
-        global last_update_time
-        
-        user_id = interaction.user.id
-        current_time = datetime.now(JST)
-        
-        # クールタイムチェック
-        if user_id in last_update_time:
-            elapsed = (current_time - last_update_time[user_id]).total_seconds()
-            if elapsed < UPDATE_COOLDOWN:
-                remaining = int(UPDATE_COOLDOWN - elapsed)
-                await interaction.response.send_message(
-                    f"⏰ あと{remaining}秒待ってください！",
-                    ephemeral=True
-                )
-                return
-        
-        # クールタイム更新
-        last_update_time[user_id] = current_time
-        
-        # リストを更新
-        await interaction.response.defer()
-        try:
-            embed = await create_playerlist_embed()
-            await interaction.message.edit(embed=embed, view=self)
-            await interaction.followup.send("✅ 更新しました！", ephemeral=True)
-            print(f"🔄 手動更新: {interaction.user.name}")
-        except Exception as e:
-            await interaction.followup.send(f"❌ 更新に失敗しました: {e}", ephemeral=True)
-            print(f"❌ 手動更新エラー: {e}")
-
-
-async def create_playerlist_embed() -> discord.Embed:
-    """プレイヤーリストのEmbedを生成"""
-    if not player_names:
-        embed = discord.Embed(
-            title="🎮 お荷物プレイヤー一覧",
-            description="登録されているプレイヤーはいません",
-            color=discord.Color.blue()
-        )
-        embed.set_footer(text=f"最終更新: {datetime.now(JST).strftime('%Y/%m/%d %H:%M:%S')}")
-        return embed
-    
-    player_list = []
-    
-    # トロフィー数でソート
-    sorted_players = sorted(
-        player_names.items(),
-        key=lambda x: x[1].get('trophies', 0) if isinstance(x[1], dict) else 0,
-        reverse=True
-    )
-    
-    for user_id_str, player_data in sorted_players:
-        try:
-            # 古いデータ形式（文字列のみ）への対応
-            if isinstance(player_data, str):
-                bs_name = player_data
-                trophy_str = ""
-            else:
-                bs_name = player_data.get('name', 'Unknown')
-                trophies = player_data.get('trophies')
-                trophy_str = f" - 🏆 {trophies:,}" if trophies else ""
-            
-            # 登録回数を取得
-            count = player_register_count.get(user_id_str, 1)
-            count_str = f" (登録{count}回)" if count > 1 else ""
-            
-            player_list.append(f"• **{bs_name}**{trophy_str}{count_str}")
-        except:
-            if isinstance(player_data, str):
-                player_list.append(f"• **{player_data}**")
-            else:
-                player_list.append(f"• **{player_data.get('name', 'Unknown')}**")
-    
-    embed = discord.Embed(
-        title="🎮 お荷物プレイヤー一覧",
-        description="\n".join(player_list) if player_list else "データなし",
-        color=discord.Color.blue()
-    )
-    embed.set_footer(text=f"合計: {len(player_names)}人 | 最終更新: {datetime.now(JST).strftime('%Y/%m/%d %H:%M:%S')}")
-    
-    return embed
 
 
 # ====== ヘルプページ用View ======
