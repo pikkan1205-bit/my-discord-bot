@@ -531,6 +531,20 @@ async def on_message(message: discord.Message):
         
         # このチャンネルでは他の処理をスキップ
         return
+
+        # --- 名前候補を表示するための関数 ---
+async def name_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    # 登録されている名前の中から、入力中の文字が含まれるものを最大25件抽出
+    choices = [
+        app_commands.Choice(name=name, value=name)
+        for name in player_names.keys() if current.lower() in name.lower()
+    ]
+    return choices[:25]
+
+
     
     # フィーロちゃん呼びかけ検出
     firo_keywords = ["フィーロちゃん", "ふぃーろちゃん", "フィーロ", "ふぃーろ"]
