@@ -1422,56 +1422,7 @@ async def playerlist_command(interaction: discord.Interaction):
 
 
 
-# ====== スラッシュコマンド /myprofile ======
-@bot.tree.command(name="myprofile", description="自分のブロスタプロフィールを確認")
-async def myprofile_command(interaction: discord.Interaction):
-    user_id_str = str(interaction.user.id)
-    
-    if user_id_str in player_names:
-        player_data = player_names[user_id_str]
-        count = player_register_count.get(user_id_str, 1)
-        
-        # 古いデータ形式への対応
-        if isinstance(player_data, str):
-            bs_name = player_data
-            embed = discord.Embed(
-                title="🎮 あなたのブロスタプロフィール",
-                color=discord.Color.blue()
-            )
-            embed.add_field(name="名前", value=f"**{bs_name}**", inline=False)
-        else:
-            bs_name = player_data.get('name', 'Unknown')
-            player_id = player_data.get('player_id')
-            trophies = player_data.get('trophies')
-            
-            embed = discord.Embed(
-                title="🎮 あなたのブロスタプロフィール",
-                color=discord.Color.blue()
-            )
-            embed.add_field(name="名前", value=f"**{bs_name}**", inline=False)
-            
-            if player_id:
-                embed.add_field(name="プレイヤーID", value=f"`{player_id}`", inline=True)
-            
-            if trophies:
-                embed.add_field(name="トロフィー", value=f"🏆 {trophies:,}", inline=True)
-            
-            embed.add_field(name="登録回数", value=f"{count}回", inline=True)
-            
-            if player_data.get('registered_at'):
-                from datetime import datetime as dt
-                registered = dt.fromisoformat(player_data['registered_at'])
-                embed.set_footer(text=f"初回登録: {registered.strftime('%Y/%m/%d')}")
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-    else:
-        channel_ids = list(BRAWLSTARS_CHANNELS)
-        channels_str = " または ".join([f"<#{ch_id}>" for ch_id in channel_ids[:2]])
-        await interaction.response.send_message(
-            f"❌ ブロスタプロフィールが登録されていません\n"
-            f"{channels_str}でプロフィール画像を送信してください！",
-            ephemeral=True
-        )
+
 
 
 # ====== スラッシュコマンド /scanhistory ======
@@ -2051,7 +2002,7 @@ async def extract_brawlstars_name(image_url: str) -> Optional[dict]:
         print("⚠️ リザルト画面（報告ボタンあり）を検出したためスキップします。")
         return None
     
-    lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
+    lines = [line.strip() for line in text.strip().split('\n') if line.strip() and "BOO!" not in line]
     
     result = {
         'name': None,
