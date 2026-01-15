@@ -1391,36 +1391,6 @@ async def playerlist_command(interaction: discord.Interaction):
     last_list_message = await interaction.original_response()
 
 
-    
-    embed = discord.Embed(
-        title="🎮 お荷物プレイヤーリスト",
-        description="報告回数が多い順に表示しています",
-        color=discord.Color.red()
-    )
-    
-    # 報告回数（player_register_count）でソート
-    sorted_players = sorted(
-        player_names.keys(),
-        key=lambda name: player_register_count.get(name, 0),
-        reverse=True
-    )
-    
-    player_list = []
-    for name in sorted_players:
-        count = player_register_count.get(name, 1)
-        player_list.append(f"• **{name}** — `{count}回報告`")
-    
-    # Discordのエンドベッド制限（4096文字）対策
-    description_text = "\n".join(player_list)
-    if len(description_text) > 4000:
-        description_text = description_text[:3997] + "..."
-        
-    embed.description = description_text
-    embed.set_footer(text=f"合計登録人数: {len(player_names)}人")
-    
-    await interaction.response.send_message(embed=embed, ephemeral=False)
-
-
 
 
 
