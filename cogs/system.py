@@ -4,6 +4,7 @@ from discord import app_commands
 from datetime import datetime, timezone, timedelta, time
 import sys
 import traceback
+from typing import Optional
 
 from utils.discord_helpers import send_error_to_owner
 # Note: config is accessed via self.bot.config
@@ -250,3 +251,4 @@ class SystemCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(SystemCog(bot))
+
