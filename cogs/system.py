@@ -7,6 +7,8 @@ import traceback
 from typing import Optional
 
 from utils.discord_helpers import send_error_to_owner
+from utils.helpers import run_unit_tests # Added import
+
 # Note: config is accessed via self.bot.config
 
 JST = timezone(timedelta(hours=9))
@@ -83,6 +85,10 @@ class SystemCog(commands.Cog):
             results.append(f"✅ 対象VC数: {len(config.TARGET_VC_IDS)}個")
             results.append(f"✅ 管理者数: {len(config.ADMIN_IDS)}人")
             
+            # 3. 単体テスト
+            test_results = run_unit_tests()
+            results.extend(test_results)
+            
             embed = discord.Embed(
                 title="🔧 Daily System Check",
                 description="\n".join(results) + "\n\n-# このメッセージはReplit.comによって自動実行されています",
@@ -152,6 +158,10 @@ class SystemCog(commands.Cog):
             results.append("✅ DM送信: 成功")
         except Exception as e:
             results.append(f"❌ DM送信: {e}")
+
+        # Unit Tests
+        test_results = run_unit_tests()
+        results.extend(test_results)
 
         # Permissions
         if interaction.guild and interaction.guild.me:
@@ -251,4 +261,3 @@ class SystemCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(SystemCog(bot))
-

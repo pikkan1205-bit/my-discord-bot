@@ -5,6 +5,7 @@ from typing import Optional, List
 import datetime
 from datetime import datetime, timezone, timedelta
 import os
+import aiohttp
 import json as json_lib
 # Google libraries
 from google.cloud import vision
@@ -24,6 +25,10 @@ class BrawlStarsCog(commands.Cog):
         }
         self.vision_client = self.setup_vision_api()
         self.last_list_message = None # In-memory reference for auto-update
+        
+        # Register Persistent View on Cog load
+        # This makes the button work even after restart
+        self.bot.add_view(self.PlayerListPagination(self.bot))
 
     def setup_vision_api(self):
         try:
@@ -108,24 +113,30 @@ class BrawlStarsCog(commands.Cog):
             return None
         
         try:
-            import aiohttp
+            # import aiohttp (Moved to top)
             async with aiohttp.ClientSession() as session:
                 async with session.get(image_url) as response:
                     if response.status != 200:
+                        print(f"⚠️ 画像取得失敗: HTTP {response.status}")
                         return None
                     content_length = response.headers.get('Content-Length')
                     MAX_SIZE = 16 * 1024 * 1024
                     if content_length and int(content_length) > MAX_SIZE:
+                        print(f"⚠️ 画像サイズ超過 (Header): {content_length}")
                         return None
                     image_data = await response.read()
                     if len(image_data) > MAX_SIZE:
-                        return None
+                         print(f"⚠️ 画像サイズ超過 (Body): {len(image_data)}")
+                         return None
             
             image = vision.Image(content=image_data)
             response = self.vision_client.text_detection(image=image)
             texts = response.text_annotations
             if texts:
                 return texts[0].description
+            return None
+        except aiohttp.ClientError as e:
+            print(f"❌ 画像ダウンロードエラー: {e}")
             return None
         except Exception as e:
             print(f"❌ 画像認識エラー: {e}")
@@ -191,7 +202,7 @@ class BrawlStarsCog(commands.Cog):
             super().__init__(timeout=None)
             self.bot = bot_instance
 
-        @discord.ui.button(label="リストを更新", style=discord.ButtonStyle.green, emoji="🔄")
+        @discord.ui.button(label="リストを更新", style=discord.ButtonStyle.green, emoji="🔄", custom_id="player_list:refresh")
         async def refresh_button(self, interaction: discord.Interaction, button: discord.ui.Button):
             cog = self.bot.get_cog("BrawlStarsCog")
             if not cog: return

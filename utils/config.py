@@ -35,6 +35,9 @@ class ConfigManager:
         self.load_config()
         self.load_player_names()
         self.load_env_initials()
+        
+        # Validation
+        self.validate_settings()
 
     def load_env_initials(self):
         """Load initial values from environment variables if set"""
@@ -70,6 +73,8 @@ class ConfigManager:
             temp_file = f"{self.CONFIG_FILE}.tmp"
             with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(config, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(temp_file, self.CONFIG_FILE)
             print(f"💾 設定を保存しました")
         except Exception as e:
@@ -108,6 +113,8 @@ class ConfigManager:
             temp_file = f"{self.PLAYER_NAMES_FILE}.tmp"
             with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(temp_file, self.PLAYER_NAMES_FILE)
             print(f"💾 プレイヤー名を保存しました")
         except Exception as e:
@@ -136,6 +143,13 @@ class ConfigManager:
             self.player_names = {}
             self.player_register_count = {}
 
+    def validate_settings(self):
+        """設定項目の整合性チェック"""
+        if self.OWNER_ID == 0:
+            print("⚠️ 警告: OWNER_ID が設定されていません。環境変数を確認してください。")
+        if not self.CONFIG_FILE:
+             print("❌ エラー: CONFIG_FILE が定義されていません。")
+             
     def is_authorized(self, user_id: int) -> bool:
         """ユーザーがオーナーまたは管理者かチェック"""
         return user_id == self.OWNER_ID or user_id in self.ADMIN_IDS
