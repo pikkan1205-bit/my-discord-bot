@@ -51,7 +51,7 @@ class VoiceCog(commands.Cog):
                         
                         # オーナーに通知
                         try:
-                            owner = await self.bot.fetch_user(config.OWNER_ID)
+                            owner = self.bot.get_user(config.OWNER_ID) or await self.bot.fetch_user(config.OWNER_ID)
                             if owner:
                                 vc_name = after.channel.name if after.channel else "不明"
                                 vc_id = after.channel.id if after.channel else "不明"
@@ -78,7 +78,7 @@ class VoiceCog(commands.Cog):
                         print(f"❌ 権限不足: {member.name} を切断できません（Move Members権限が必要）")
                         # オーナーに権限エラーを通知
                         try:
-                            owner = await self.bot.fetch_user(config.OWNER_ID)
+                            owner = self.bot.get_user(config.OWNER_ID) or await self.bot.fetch_user(config.OWNER_ID)
                             if owner:
                                 await owner.send(
                                     f"⚠️ **権限エラー**\n"
@@ -218,7 +218,7 @@ class VoiceCog(commands.Cog):
             user_names = []
             for user_id in config.BLOCKED_USERS:
                 try:
-                    member = await guild.fetch_member(user_id)
+                    member = guild.get_member(user_id) or await guild.fetch_member(user_id)
                     user_names.append(f"- {member.name} ({user_id})")
                 except:
                     user_names.append(f"- ID: {user_id} (未確認)")
@@ -230,7 +230,7 @@ class VoiceCog(commands.Cog):
             vc_names = []
             for vc_id in config.TARGET_VC_IDS:
                 try:
-                    channel = await guild.fetch_channel(vc_id)
+                    channel = guild.get_channel(vc_id) or await guild.fetch_channel(vc_id)
                     vc_names.append(f"- {channel.name} ({vc_id})")
                 except:
                     vc_names.append(f"- ID: {vc_id} (未確認)")
@@ -255,6 +255,7 @@ class VoiceCog(commands.Cog):
         config = self.bot.config
         if interaction.user.id != config.OWNER_ID:
             await interaction.response.send_message("このコマンドはオーナーのみが使用できます。", ephemeral=True)
+            await log_to_owner(self.bot, config, "error", interaction.user, "/simvc", "Unauthorized access attempt")
             return
         
         await interaction.response.defer(ephemeral=True)

@@ -5,9 +5,10 @@ from typing import Optional
 from datetime import datetime, timezone, timedelta
 import os
 import re
+import asyncio
 from googleapiclient.discovery import build
 
-from utils.discord_helpers import log_to_owner
+from utils.discord_helpers import log_to_owner, send_error_to_owner
 from utils.helpers import normalize_text
 
 JST = timezone(timedelta(hours=9))
@@ -40,7 +41,7 @@ class ChatCog(commands.Cog):
         if isinstance(message.channel, discord.DMChannel):
             if message.author.id == config.OWNER_ID: return
             try:
-                owner = await self.bot.fetch_user(config.OWNER_ID)
+                owner = self.bot.get_user(config.OWNER_ID) or await self.bot.fetch_user(config.OWNER_ID)
                 current_time = datetime.now(JST).strftime("%Y年%m月%d日 %H:%M:%S")
                 embed = discord.Embed(
                     title="📩 DM受信",
@@ -69,7 +70,11 @@ class ChatCog(commands.Cog):
         if message.author.id == config.OWNER_ID:
             normalized = normalize_text(message.content)
             delete_words = ["削除", "消して", "掃除", "クリア", "clear", "消去"]
-            if ("チャット" in normalized or "メッセージ" in normalized) and any(w in normalized for w in delete_words):
+            
+            # 誤爆防止: 「チャット」や「メッセージ」が明示的に含まれている場合のみ実行
+            target_words = ["チャット", "メッセージ", "ログ"]
+            
+            if any(t in normalized for t in target_words) and any(w in normalized for w in delete_words):
                 if "監視" not in normalized:
                     match = re.search(r"(\d+)件", message.content)
                     limit = int(match.group(1)) if match else 300
@@ -94,9 +99,12 @@ class ChatCog(commands.Cog):
         
         try:
             async with message.channel.typing():
-                result = self.google_service.cse().list(
-                    q=query, cx=self.GOOGLE_CSE_ID, num=5
-                ).execute()
+                def run_search():
+                    return self.google_service.cse().list(
+                        q=query, cx=self.GOOGLE_CSE_ID, num=5
+                    ).execute()
+                
+                result = await asyncio.to_thread(run_search)
                 
                 if 'items' not in result:
                     await message.reply(f"🔍 「{query}」の検索結果が見つかりませんでした。")
@@ -113,6 +121,7 @@ class ChatCog(commands.Cog):
                 await message.reply(embed=embed)
         except Exception as e:
             await message.reply(f"❌ 検索エラー: {e}")
+            await send_error_to_owner(self.bot, self.bot.config, "Google Search Error", e, f"Query: {query}")
 
 
     # ====== Commands ======
@@ -121,6 +130,7 @@ class ChatCog(commands.Cog):
         config = self.bot.config
         if not config.is_authorized(interaction.user.id):
             await interaction.response.send_message("このコマンドを使う権限はありません。", ephemeral=True)
+            await log_to_owner(self.bot, config, "error", interaction.user, "/say", "Unauthorized access attempt")
             return
 
         target_channel = channel or interaction.channel
@@ -140,6 +150,7 @@ class ChatCog(commands.Cog):
         config = self.bot.config
         if not config.is_authorized(interaction.user.id):
             await interaction.response.send_message("権限がありません。", ephemeral=True)
+            await log_to_owner(self.bot, config, "error", interaction.user, "/clear", "Unauthorized access attempt")
             return
 
         if not interaction.channel or not hasattr(interaction.channel, 'purge'):
@@ -169,6 +180,7 @@ class ChatCog(commands.Cog):
         config = self.bot.config
         if interaction.user.id != config.OWNER_ID:
             await interaction.response.send_message("権限がありません。", ephemeral=True)
+            await log_to_owner(self.bot, config, "error", interaction.user, "/dm", "Unauthorized access attempt")
             return
         
         await interaction.response.defer(ephemeral=True)

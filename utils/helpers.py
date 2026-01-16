@@ -51,10 +51,7 @@ SYNONYMS = {
 sorted_keys = sorted(SYNONYMS.keys(), key=len, reverse=True)
 SYNONYM_PATTERN = re.compile("|".join(map(re.escape, sorted_keys)), re.IGNORECASE)
 
-def normalize_text(text: str) -> str:
-    """テキストを正規化（スペース除去、小文字化）"""
-    text = text.replace(" ", "").replace("　", "")
-    return text.lower()
+
 
 def has_any(text: str, keywords: list) -> bool:
     """キーワードのいずれかが含まれるか"""

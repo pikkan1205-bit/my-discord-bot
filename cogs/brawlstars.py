@@ -6,12 +6,13 @@ import datetime
 from datetime import datetime, timezone, timedelta
 import os
 import aiohttp
+import asyncio
 import json as json_lib
 # Google libraries
 from google.cloud import vision
 from google.oauth2 import service_account
 
-from utils.discord_helpers import log_to_owner # Not heavily used here but good to have
+from utils.discord_helpers import log_to_owner, send_error_to_owner
 from utils.helpers import normalize_text
 
 JST = timezone(timedelta(hours=9))
@@ -71,40 +72,44 @@ class BrawlStarsCog(commands.Cog):
             for attachment in message.attachments:
                 if attachment.content_type and attachment.content_type.startswith('image/'):
                     async with message.channel.typing():
-                        result = await self.extract_brawlstars_name(attachment.url)
-                        
-                        if result and result['name']:
-                            player_name = result['name']
+                        try:
+                            result = await self.extract_brawlstars_name(attachment.url)
                             
-                            # 名前がすでに登録されているかチェック
-                            if player_name in config.player_names:
-                                # 登録回数を増やす
-                                config.player_register_count[player_name] = config.player_register_count.get(player_name, 0) + 1
-                                count = config.player_register_count[player_name]
+                            if result and result['name']:
+                                player_name = result['name']
                                 
-                                # データの更新
-                                config.player_names[player_name]['last_updated'] = datetime.now(JST).isoformat()
-                                config.save_player_names()
+                                # 名前がすでに登録されているかチェック
+                                if player_name in config.player_names:
+                                    # 登録回数を増やす
+                                    config.player_register_count[player_name] = config.player_register_count.get(player_name, 0) + 1
+                                    count = config.player_register_count[player_name]
+                                    
+                                    # データの更新
+                                    config.player_names[player_name]['last_updated'] = datetime.now(JST).isoformat()
+                                    config.save_player_names()
 
-                                await self.update_latest_list()
+                                    await self.update_latest_list()
+                                    
+                                    await message.channel.send(f"「{player_name}」は既に追加されてるよ！通算{count}回目だね")
+                                    print(f"🔄 報告カウントアップ: {player_name} ({count}回目)")
                                 
-                                await message.channel.send(f"「{player_name}」は既に追加されてるよ！通算{count}回目だね")
-                                print(f"🔄 報告カウントアップ: {player_name} ({count}回目)")
-                            
+                                else:
+                                    # 新規登録
+                                    config.player_names[player_name] = {
+                                        'name': player_name,
+                                        'registered_at': datetime.now(JST).isoformat(),
+                                        'last_updated': datetime.now(JST).isoformat()
+                                    }
+                                    config.player_register_count[player_name] = 1
+                                    config.save_player_names()
+                                    await self.update_latest_list()
+                                    await message.channel.send(f"お荷物プレイヤー「{player_name}」を新しく記録したよ！")
+                                    print(f"✅ 新規名前登録: {player_name}")
                             else:
-                                # 新規登録
-                                config.player_names[player_name] = {
-                                    'name': player_name,
-                                    'registered_at': datetime.now(JST).isoformat(),
-                                    'last_updated': datetime.now(JST).isoformat()
-                                }
-                                config.player_register_count[player_name] = 1
-                                config.save_player_names()
-                                await self.update_latest_list()
-                                await message.channel.send(f"お荷物プレイヤー「{player_name}」を新しく記録したよ！")
-                                print(f"✅ 新規名前登録: {player_name}")
-                        else:
-                            print(f"⚠️ プロフィール認識失敗: {message.author.name}")
+                                print(f"⚠️ プロフィール認識失敗: {message.author.name}")
+                        except Exception as e:
+                            print(f"❌ 画像認識エラー: {e}")
+                            await send_error_to_owner(self.bot, config, "BrawlStars Scan Error", e, f"User: {message.author.name}")
                     break # 最初の1枚のみ処理
 
     # ====== 内部ロジック ======
@@ -130,7 +135,12 @@ class BrawlStarsCog(commands.Cog):
                          return None
             
             image = vision.Image(content=image_data)
-            response = self.vision_client.text_detection(image=image)
+            
+            def run_vision():
+                return self.vision_client.text_detection(image=image)
+            
+            response = await asyncio.to_thread(run_vision)
+            
             texts = response.text_annotations
             if texts:
                 return texts[0].description
@@ -254,6 +264,9 @@ class BrawlStarsCog(commands.Cog):
                 embed.set_footer(text=f"{embed.footer.text} (自動更新済み)")
                 await self.last_list_message.edit(embed=embed, view=view)
                 print("✨ リストを自動更新しました")
+            except discord.NotFound:
+                print("⚠️ リスト更新失敗: メッセージが見つかりません (削除された可能性があります)")
+                self.last_list_message = None
             except Exception as e:
                 print(f"⚠️ 自動更新失敗: {e}")
                 self.last_list_message = None
@@ -278,6 +291,7 @@ class BrawlStarsCog(commands.Cog):
         config = self.bot.config
         if interaction.user.id != config.OWNER_ID:
             await interaction.response.send_message("オーナーのみ使用可能です。", ephemeral=True)
+            await log_to_owner(self.bot, config, "error", interaction.user, "/player_edit", "Unauthorized access attempt")
             return
 
         if old_name not in config.player_names:
@@ -298,6 +312,7 @@ class BrawlStarsCog(commands.Cog):
         config = self.bot.config
         if interaction.user.id != config.OWNER_ID:
             await interaction.response.send_message("オーナーのみ使用可能です。", ephemeral=True)
+            await log_to_owner(self.bot, config, "error", interaction.user, "/player_delete", "Unauthorized access attempt")
             return
 
         if name not in config.player_names:
@@ -316,6 +331,7 @@ class BrawlStarsCog(commands.Cog):
         config = self.bot.config
         if interaction.user.id != config.OWNER_ID:
             await interaction.response.send_message("このコマンドはオーナーのみが使用できます。", ephemeral=True)
+            await log_to_owner(self.bot, config, "error", interaction.user, "/scanhistory", "Unauthorized access attempt")
             return
         
         target_channel = channel or interaction.channel
@@ -378,6 +394,7 @@ class BrawlStarsCog(commands.Cog):
             await interaction.followup.send(embed=result_embed)
         except Exception as e:
             await interaction.followup.send(f"❌ エラー: {e}")
+            await send_error_to_owner(self.bot, config, "ScanHistory Error", e)
             print(f"❌ 一括登録エラー: {e}")
 
 async def setup(bot):

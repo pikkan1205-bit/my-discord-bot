@@ -8,7 +8,7 @@ JST = timezone(timedelta(hours=9))
 async def log_to_owner(bot, config, log_type: str, user: Union[discord.User, discord.Member], command: str, details: str = ""):
     """管理者アクションまたは権限エラーをオーナーにDMでログ通知"""
     try:
-        owner = await bot.fetch_user(config.OWNER_ID)
+        owner = bot.get_user(config.OWNER_ID) or await bot.fetch_user(config.OWNER_ID)
         current_time = datetime.now(JST).strftime("%Y年%m月%d日 %H:%M:%S")
         
         if log_type == "action":
@@ -35,7 +35,7 @@ async def log_to_owner(bot, config, log_type: str, user: Union[discord.User, dis
 async def send_error_to_owner(bot, config, error_type: str, error: Exception, context: str = ""):
     """エラーをオーナーにDMで通知"""
     try:
-        owner = await bot.fetch_user(config.OWNER_ID)
+        owner = bot.get_user(config.OWNER_ID) or await bot.fetch_user(config.OWNER_ID)
         current_time = datetime.now(JST).strftime("%Y年%m月%d日 %H:%M:%S")
         
         embed = discord.Embed(

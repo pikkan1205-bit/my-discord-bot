@@ -6,7 +6,7 @@ import sys
 import traceback
 from typing import Optional
 
-from utils.discord_helpers import send_error_to_owner
+from utils.discord_helpers import send_error_to_owner, log_to_owner
 from utils.helpers import run_unit_tests # Added import
 
 # Note: config is accessed via self.bot.config
@@ -117,6 +117,7 @@ class SystemCog(commands.Cog):
         config = self.bot.config
         if interaction.user.id != config.OWNER_ID:
             await interaction.response.send_message("権限がありません。", ephemeral=True)
+            await log_to_owner(self.bot, config, "error", interaction.user, "/restart", "Unauthorized access attempt")
             return
         
         await interaction.response.send_message("🔄 ボットを再起動します...", ephemeral=True)
@@ -129,6 +130,7 @@ class SystemCog(commands.Cog):
         config = self.bot.config
         if interaction.user.id != config.OWNER_ID:
             await interaction.response.send_message("権限がありません。", ephemeral=True)
+            await log_to_owner(self.bot, config, "error", interaction.user, "/test", "Unauthorized access attempt")
             return
         
         await interaction.response.defer()
@@ -153,7 +155,7 @@ class SystemCog(commands.Cog):
         
         # Helper Test
         try:
-            owner = await self.bot.fetch_user(config.OWNER_ID)
+            owner = self.bot.get_user(config.OWNER_ID) or await self.bot.fetch_user(config.OWNER_ID)
             await owner.send(embed=discord.Embed(title="🔧 DMテスト", description="System Check", color=discord.Color.blue()))
             results.append("✅ DM送信: 成功")
         except Exception as e:
@@ -184,6 +186,7 @@ class SystemCog(commands.Cog):
         config = self.bot.config
         if interaction.user.id != config.OWNER_ID:
             await interaction.response.send_message("権限がありません。", ephemeral=True)
+            await log_to_owner(self.bot, config, "error", interaction.user, "/autoping", "Unauthorized access attempt")
             return
 
         if action == "on":
@@ -215,6 +218,7 @@ class SystemCog(commands.Cog):
         def get_public_page(self):
             embed = discord.Embed(title="📖 ヘルプ - 一般", color=discord.Color.green())
             embed.add_field(name="🏓 /ping", value="応答速度確認", inline=False)
+            embed.add_field(name="🎮 /playerlist", value="お荷物プレイヤーリスト表示", inline=False)
             embed.set_footer(text="Page 1/3")
             return embed
         
@@ -224,16 +228,22 @@ class SystemCog(commands.Cog):
              embed.add_field(name="👤 /blockuser", value="ユーザー追加/削除", inline=False)
              embed.add_field(name="🎙️ /blockvc", value="VC追加/削除", inline=False)
              embed.add_field(name="📋 /list", value="設定一覧", inline=False)
+             embed.add_field(name="🎭 /simvc", value="VC切断シミュレーション", inline=False)
              embed.set_footer(text="Page 2/3")
              return embed
 
         def get_owner_page(self):
              embed = discord.Embed(title="📖 ヘルプ - オーナー", color=discord.Color.orange())
              embed.add_field(name="👨‍💼 /addadmin /removeadmin", value="管理者管理", inline=False)
+             embed.add_field(name="📋 /listadmin", value="管理者一覧", inline=False)
+             embed.add_field(name="🚪 /exit", value="管理者モード終了", inline=False)
              embed.add_field(name="💬 /say", value="代理発言", inline=False)
+             embed.add_field(name="🧹 /clear", value="チャット削除", inline=False)
              embed.add_field(name="✉️ /dm", value="DM送信", inline=False)
              embed.add_field(name="🔧 /test", value="システムチェック", inline=False)
+             embed.add_field(name="🔄 /restart", value="ボット再起動", inline=False)
              embed.add_field(name="⏰ /autoping", value="自動ping設定", inline=False)
+             embed.add_field(name="🎮 プレイヤー管理", value="/player_edit, /player_delete\n/scanhistory", inline=False)
              embed.set_footer(text="Page 3/3")
              return embed
 

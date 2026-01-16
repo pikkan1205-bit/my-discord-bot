@@ -1,64 +1,68 @@
 import discord
 from discord.ext import commands
 import os
-import sys
 
 from utils.config import ConfigManager
 from utils.discord_helpers import send_error_to_owner
 
-# ====== Intents 設定 ======
-intents = discord.Intents.default()
-intents.members = True
-intents.voice_states = True
-intents.message_content = True
+# ====== Bot Class Definition ======
+class MyBot(commands.Bot):
+    def __init__(self):
+        # Intents 設定
+        intents = discord.Intents.default()
+        intents.members = True
+        intents.voice_states = True
+        intents.message_content = True
+        
+        super().__init__(command_prefix="!", intents=intents)
+        
+        # Attach shared config
+        self.config = ConfigManager()
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+    async def setup_hook(self):
+        # Validation on startup
+        if self.config.OWNER_ID == 0:
+            print("❌ エラー: OWNER_ID環境変数が設定されていません")
+            # We continue but warn
+        
+        # Load Extensions
+        initial_extensions = [
+            "cogs.admin",
+            "cogs.voice",
+            "cogs.chat",
+            "cogs.system",
+            "cogs.brawlstars",
+        ]
+        
+        for extension in initial_extensions:
+            try:
+                await self.load_extension(extension)
+                print(f"✅ Extension loaded: {extension}")
+            except Exception as e:
+                print(f"❌ Failed to load extension {extension}: {e}")
 
-# Attach shared config to bot instance
-bot.config = ConfigManager()
-
-# Validation on startup
-if bot.config.OWNER_ID == 0:
-    print("❌ エラー: OWNER_ID環境変数が設定されていません")
-    # exit(1) # We won't exit hard here to allow repl healing if possible
-
-@bot.event
-async def on_ready():
-    print(f"ログイン成功: {bot.user}")
-    
-    # Load Extensions
-    initial_extensions = [
-        "cogs.admin",
-        "cogs.voice",
-        "cogs.chat",
-        "cogs.system",
-        "cogs.brawlstars",
-    ]
-    
-    for extension in initial_extensions:
+        # Sync Commands
         try:
-            await bot.load_extension(extension)
-            print(f"✅ Extension loaded: {extension}")
+            await self.tree.sync()
+            print(f"✅ Synced commands.")
         except Exception as e:
-            print(f"❌ Failed to load extension {extension}: {e}")
+            print(f"❌ Failed to sync: {e}")
 
-    # Sync Commands
-    try:
-        await bot.tree.sync()
-        print(f"✅ Synced commands.")
-    except Exception as e:
-        print(f"❌ Failed to sync: {e}")
+    async def on_ready(self):
+        print(f"ログイン成功: {self.user}")
+        
+        # Set Presence
+        activity = discord.Game(name="ブロスタ")
+        await self.change_presence(activity=activity)
 
-    # Set Presence
-    activity = discord.Game(name="ブロスタ")
-    await bot.change_presence(activity=activity)
+        # Notify Owner
+        try:
+            owner = self.get_user(self.config.OWNER_ID) or await self.fetch_user(self.config.OWNER_ID)
+            await owner.send("✅ ボットがリファクタリング後の構成で起動(再接続)しました！")
+        except Exception as e:
+             print(f"❌ 起動通知失敗: {e}")
 
-    # Notify Owner
-    try:
-        owner = await bot.fetch_user(bot.config.OWNER_ID)
-        await owner.send("✅ ボットがリファクタリング後の構成で再起動しました！")
-    except Exception as e:
-         print(f"❌ 起動通知失敗: {e}")
+bot = MyBot()
 
 # Global Error Handler for Slash Commands (registered to tree)
 async def on_tree_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
