@@ -12,6 +12,7 @@ class ConfigManager:
         # Constants
         self.CONFIG_FILE = "vcblock_config.json"
         self.PLAYER_NAMES_FILE = "player_names.json"
+        self.CHECK_PLAYER_NAMES_FILE = "check_player_names.json"
         
         # Admin Mode Settings
         self.ADMIN_MODE_TIMEOUT = 120  # 2分（秒）
@@ -28,12 +29,17 @@ class ConfigManager:
         self.player_names: Dict = {}
         self.player_register_count: Dict = {}
         
+        # Check Results Data
+        self.check_player_names: Dict = {}
+        self.check_player_register_count: Dict = {}
+        
         # Admin Mode State {user_id: timestamp}
         self.admin_mode_users: Dict = {}
         
         # Initial Load
         self.load_config()
         self.load_player_names()
+        self.load_check_player_names()
         self.load_env_initials()
         
         # Validation
@@ -142,6 +148,44 @@ class ConfigManager:
             print(f"❌ プレイヤー名読み込みエラー: {e}")
             self.player_names = {}
             self.player_register_count = {}
+
+    def save_check_player_names(self):
+        """確認用プレイヤー名をJSONに保存"""
+        try:
+            data = {
+                'players': self.check_player_names,
+                'counts': self.check_player_register_count
+            }
+            temp_file = f"{self.CHECK_PLAYER_NAMES_FILE}.tmp"
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_file, self.CHECK_PLAYER_NAMES_FILE)
+            print(f"💾 確認用プレイヤー名を保存しました")
+        except Exception as e:
+            print(f"❌ 確認用プレイヤー名保存エラー: {e}")
+
+    def load_check_player_names(self):
+        """確認用プレイヤー名をJSONから読み込み"""
+        try:
+            if os.path.exists(self.CHECK_PLAYER_NAMES_FILE):
+                with open(self.CHECK_PLAYER_NAMES_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict) and 'players' in data:
+                    self.check_player_names = data.get('players', {})
+                    self.check_player_register_count = data.get('counts', {})
+                else:
+                    self.check_player_names = data
+                    self.check_player_register_count = {}
+                print(f"📂 確認用プレイヤー名を読み込みました: {len(self.check_player_names)}人")
+            else:
+                self.check_player_names = {}
+                self.check_player_register_count = {}
+        except Exception as e:
+            print(f"❌ 確認用プレイヤー名読み込みエラー: {e}")
+            self.check_player_names = {}
+            self.check_player_register_count = {}
 
     def validate_settings(self):
         """設定項目の整合性チェック"""

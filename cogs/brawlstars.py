@@ -24,6 +24,9 @@ class BrawlStarsCog(commands.Cog):
             1379353245658648717,
             1445382523449376911
         }
+        self.CHECK_CHANNEL_ID = 1379796929667661824
+        self.LOG_CHANNEL_ID = 1451604528171585667
+        self.SAFE_ROLE_ID = 1379322863215186094
         self.vision_client = self.setup_vision_api()
         self.last_list_message = None # In-memory reference for auto-update
         
@@ -66,8 +69,11 @@ class BrawlStarsCog(commands.Cog):
         if message.author.bot:
             return
 
-        # ブロスタチャンネルでのみ動作
-        if message.channel.id in self.BRAWLSTARS_CHANNELS and message.attachments:
+        # ブロスタチャンネルまたはチェック用チャンネルでのみ動作
+        is_report_channel = message.channel.id in self.BRAWLSTARS_CHANNELS
+        is_check_channel = message.channel.id == self.CHECK_CHANNEL_ID
+
+        if (is_report_channel or is_check_channel) and message.attachments:
             config = self.bot.config
             for attachment in message.attachments:
                 if attachment.content_type and attachment.content_type.startswith('image/'):
@@ -78,33 +84,72 @@ class BrawlStarsCog(commands.Cog):
                             if result and result['name']:
                                 player_name = result['name']
                                 
-                                # 名前がすでに登録されているかチェック
-                                if player_name in config.player_names:
-                                    # 登録回数を増やす
-                                    config.player_register_count[player_name] = config.player_register_count.get(player_name, 0) + 1
-                                    count = config.player_register_count[player_name]
-                                    
-                                    # データの更新
-                                    config.player_names[player_name]['last_updated'] = datetime.now(JST).isoformat()
-                                    config.save_player_names()
-
-                                    await self.update_latest_list()
-                                    
-                                    await message.channel.send(f"「{player_name}」は既に追加されてるよ！通算{count}回目だね")
-                                    print(f"🔄 報告カウントアップ: {player_name} ({count}回目)")
+                                if is_report_channel:
+                                    # 既存の報告フロー (player_names.json)
+                                    if player_name in config.player_names:
+                                        config.player_register_count[player_name] = config.player_register_count.get(player_name, 0) + 1
+                                        count = config.player_register_count[player_name]
+                                        config.player_names[player_name]['last_updated'] = datetime.now(JST).isoformat()
+                                        config.save_player_names()
+                                        await self.update_latest_list()
+                                        await message.channel.send(f"「{player_name}」は既に追加されてるよ！通算{count}回目だね")
+                                        print(f"🔄 報告カウントアップ: {player_name} ({count}回目)")
+                                    else:
+                                        config.player_names[player_name] = {
+                                            'name': player_name,
+                                            'registered_at': datetime.now(JST).isoformat(),
+                                            'last_updated': datetime.now(JST).isoformat()
+                                        }
+                                        config.player_register_count[player_name] = 1
+                                        config.save_player_names()
+                                        await self.update_latest_list()
+                                        await message.channel.send(f"お荷物プレイヤー「{player_name}」を新しく記録したよ！")
+                                        print(f"✅ 新規名前登録: {player_name}")
                                 
-                                else:
-                                    # 新規登録
-                                    config.player_names[player_name] = {
+                                elif is_check_channel:
+                                    # 新しい確認フロー (check_player_names.json)
+                                    # 1. 記録
+                                    config.check_player_names[player_name] = {
                                         'name': player_name,
-                                        'registered_at': datetime.now(JST).isoformat(),
-                                        'last_updated': datetime.now(JST).isoformat()
+                                        'checked_at': datetime.now(JST).isoformat(),
+                                        'user_id': message.author.id
                                     }
-                                    config.player_register_count[player_name] = 1
-                                    config.save_player_names()
-                                    await self.update_latest_list()
-                                    await message.channel.send(f"お荷物プレイヤー「{player_name}」を新しく記録したよ！")
-                                    print(f"✅ 新規名前登録: {player_name}")
+                                    config.check_player_register_count[player_name] = config.check_player_register_count.get(player_name, 0) + 1
+                                    config.save_check_player_names()
+                                    print(f"📝 確認ログ記録: {player_name}")
+
+                                    # 2. 比較と判定
+                                    if player_name in config.player_names:
+                                        # 危険信号 🚨
+                                        await message.channel.send(f"🚨 **危険信号:** 「{player_name}」はお荷物リストに登録されています！要注意人物です。")
+                                        
+                                        log_channel = self.bot.get_channel(self.LOG_CHANNEL_ID) or await self.bot.fetch_channel(self.LOG_CHANNEL_ID)
+                                        if log_channel:
+                                            embed = discord.Embed(
+                                                title="⚠️ 要注意人物の来訪",
+                                                description=f"お荷物リストに登録されているプレイヤーが検出されました。",
+                                                color=discord.Color.red()
+                                            )
+                                            embed.add_field(name="プレイヤー名", value=player_name, inline=True)
+                                            embed.add_field(name="実行者", value=f"{message.author.mention} ({message.author.id})", inline=True)
+                                            embed.set_footer(text=f"判定時刻: {datetime.now(JST).strftime('%Y/%m/%d %H:%M:%S')}")
+                                            await log_channel.send(embed=embed)
+                                    else:
+                                        # OK信号 ✅
+                                        await message.channel.send(f"✅ **OK信号:** 「{player_name}」はお荷物リストに含まれていません。ロールを付与します。")
+                                        
+                                        # ロール付与
+                                        try:
+                                            role = message.guild.get_role(self.SAFE_ROLE_ID)
+                                            if role:
+                                                await message.author.add_roles(role)
+                                                await message.channel.send(f"✨ {message.author.mention} に {role.name} ロールを付与しました！")
+                                            else:
+                                                print(f"❌ ロールID {self.SAFE_ROLE_ID} が見つかりません。")
+                                        except Exception as role_err:
+                                            print(f"❌ ロール付与失敗: {role_err}")
+                                            await message.channel.send("⚠️ ロールの付与に失敗しました。ボットの権限とロールの順位を確認してください。")
+
                             else:
                                 print(f"⚠️ プロフィール認識失敗: {message.author.name}")
                         except Exception as e:
