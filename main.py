@@ -25,7 +25,20 @@ class MyBot(commands.Bot):
             print("❌ エラー: OWNER_ID環境変数が設定されていません")
             # We continue but warn
         
+        # Start console input listener
+        self.loop.create_task(self.console_input_handler())
+
         # Load Extensions
+        await self.load_all_extensions()
+
+        # Sync Commands
+        try:
+            await self.tree.sync()
+            print(f"✅ Synced commands.")
+        except Exception as e:
+            print(f"❌ Failed to sync: {e}")
+
+    async def load_all_extensions(self):
         initial_extensions = [
             "cogs.admin",
             "cogs.voice",
@@ -36,17 +49,40 @@ class MyBot(commands.Bot):
         
         for extension in initial_extensions:
             try:
-                await self.load_extension(extension)
-                print(f"✅ Extension loaded: {extension}")
+                # すでにロードされている場合はリロード
+                if extension in self.extensions:
+                    await self.reload_extension(extension)
+                    print(f"✅ Extension reloaded: {extension}")
+                else:
+                    await self.load_extension(extension)
+                    print(f"✅ Extension loaded: {extension}")
             except Exception as e:
-                print(f"❌ Failed to load extension {extension}: {e}")
+                print(f"❌ Failed to load/reload extension {extension}: {e}")
 
-        # Sync Commands
-        try:
-            await self.tree.sync()
-            print(f"✅ Synced commands.")
-        except Exception as e:
-            print(f"❌ Failed to sync: {e}")
+    async def console_input_handler(self):
+        """コンソール（SparkedHost/Terminal）からの入力を監視"""
+        import aioconsole # 非同期で標準入力を待機するために必要
+        print("⌨️  Console commands ready. Type 'reload' to refresh cogs.")
+        
+        while True:
+            try:
+                line = await aioconsole.ainput()
+                command = line.strip().lower()
+                
+                if command == "reload":
+                    print("🔄 Reloading all extensions...")
+                    await self.load_all_extensions()
+                    # コマンドの同期も再実行
+                    await self.tree.sync()
+                    print("✨ Reload complete!")
+                elif command == "help":
+                    print("📋 Available console commands: reload, help")
+                elif command == "":
+                    continue
+                else:
+                    print(f"❓ Unknown command: {command}")
+            except Exception as e:
+                print(f"❌ Console error: {e}")
 
     async def on_ready(self):
         print(f"ログイン成功: {self.user}")
