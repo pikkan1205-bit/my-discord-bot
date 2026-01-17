@@ -75,8 +75,26 @@ class MyBot(commands.Bot):
                     # コマンドの同期も再実行
                     await self.tree.sync()
                     print("✨ Reload complete!")
+                elif command.startswith("say "):
+                    # say <channel_id> <message>
+                    parts = line.strip().split(" ", 2)
+                    if len(parts) < 3:
+                        print("⚠️ Usage: say <channel_id> <message>")
+                        continue
+                    
+                    channel_id_str, say_content = parts[1], parts[2]
+                    if not channel_id_str.isdigit():
+                        print("❌ Error: Channel ID must be numeric.")
+                        continue
+                    
+                    channel = self.get_channel(int(channel_id_str)) or await self.fetch_channel(int(channel_id_str))
+                    if channel:
+                        await channel.send(say_content)
+                        print(f"✅ Sent to #{channel.name}: {say_content}")
+                    else:
+                        print(f"❌ Error: Channel {channel_id_str} not found.")
                 elif command == "help":
-                    print("📋 Available console commands: reload, help")
+                    print("📋 Available console commands: reload, say <channel_id> <msg>, help")
                 elif command == "":
                     continue
                 else:
