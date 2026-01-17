@@ -91,8 +91,16 @@ class MyBot(commands.Bot):
                         print(f"✅ Sent to #{channel.name}: {say_content}")
                     else:
                         print(f"❌ Error: Channel {target_channel_id} not found.")
+                elif command == "check":
+                    print("🔄 Checking history for 'check_player_names.json'...")
+                    cog = self.get_cog("BrawlStarsCog")
+                    if cog:
+                        # 非同期タスクとして実行
+                        self.loop.create_task(cog.batch_check_history(limit=100))
+                    else:
+                        print("❌ Error: BrawlStarsCog not loaded.")
                 elif command == "help":
-                    print("📋 Available console commands: reload, say <msg>, help")
+                    print("📋 Available console commands: reload, say <msg>, check, help")
                 elif command == "":
                     continue
                 else:

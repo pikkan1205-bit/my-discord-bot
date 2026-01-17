@@ -119,9 +119,12 @@ class BrawlStarsCog(commands.Cog):
                                     print(f"📝 確認ログ記録: {player_name}")
 
                                     # 2. 比較と判定
-                                    if player_name in config.player_names:
+                                    response_text = ""
+                                    is_hazard = player_name in config.player_names
+
+                                    if is_hazard:
                                         # 危険信号 🚨
-                                        await message.channel.send(f"🚨 **危険信号:** 「{player_name}」はお荷物リストに登録されています！要注意人物です。")
+                                        response_text = "敵が殺せ！"
                                         
                                         log_channel = self.bot.get_channel(self.LOG_CHANNEL_ID) or await self.bot.fetch_channel(self.LOG_CHANNEL_ID)
                                         if log_channel:
@@ -135,20 +138,26 @@ class BrawlStarsCog(commands.Cog):
                                             embed.set_footer(text=f"判定時刻: {datetime.now(JST).strftime('%Y/%m/%d %H:%M:%S')}")
                                             await log_channel.send(embed=embed)
                                     else:
-                                        # OK信号 ✅
-                                        await message.channel.send(f"✅ **OK信号:** 「{player_name}」はお荷物リストに含まれていません。ロールを付与します。")
-                                        
+                                        # OK信号 -> メッセージを削除、ロール付与通知のみ
                                         # ロール付与
                                         try:
                                             role = message.guild.get_role(self.SAFE_ROLE_ID)
                                             if role:
                                                 await message.author.add_roles(role)
-                                                await message.channel.send(f"✨ {message.author.mention} に {role.name} ロールを付与しました！")
+                                                response_text = f"✨ {role.name} ロールを付与しました！"
                                             else:
-                                                print(f"❌ ロールID {self.SAFE_ROLE_ID} が見つかりません。")
+                                                response_text = "✅ お荷物リストにはいませんが、付与するロールが見つかりませんでした。"
                                         except Exception as role_err:
                                             print(f"❌ ロール付与失敗: {role_err}")
-                                            await message.channel.send("⚠️ ロールの付与に失敗しました。ボットの権限とロールの順位を確認してください。")
+                                            response_text = "⚠️ お荷物リストにはいませんが、ロールの付与に失敗しました。"
+
+                                    # 送信者のみに表示（on_messageではDMで対応）
+                                    if response_text:
+                                        try:
+                                            await message.author.send(response_text)
+                                        except:
+                                            # DM拒否の場合は仕方なくチャンネルに送信（後で消えるように設定）
+                                            await message.channel.send(f"{message.author.mention} {response_text}", delete_after=10)
 
                             else:
                                 print(f"⚠️ プロフィール認識失敗: {message.author.name}")
@@ -330,6 +339,67 @@ class BrawlStarsCog(commands.Cog):
         await interaction.response.send_message(embed=embed, view=view)
         self.last_list_message = await interaction.original_response()
 
+    @app_commands.command(name="check", description="画像をスキャンしてお荷物リストにいるか確認し、安全ならロールを付与します")
+    @app_commands.describe(image="スキャンする画像")
+    async def check_command(self, interaction: discord.Interaction, image: discord.Attachment):
+        if not image.content_type or not image.content_type.startswith('image/'):
+            await interaction.response.send_message("❌ 画像ファイルを指定してください。", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        config = self.bot.config
+
+        try:
+            result = await self.extract_brawlstars_name(image.url)
+            if not result or not result['name']:
+                await interaction.followup.send("⚠️ プレイヤー名を認識できませんでした。文字が鮮明な画像でもう一度お試しください。", ephemeral=True)
+                return
+
+            player_name = result['name']
+            
+            # 確認ログの記録
+            config.check_player_names[player_name] = {
+                'name': player_name,
+                'checked_at': datetime.now(JST).isoformat(),
+                'user_id': interaction.user.id
+            }
+            config.check_player_register_count[player_name] = config.check_player_register_count.get(player_name, 0) + 1
+            config.save_check_player_names()
+
+            # 判定
+            if player_name in config.player_names:
+                # 危険信号
+                await interaction.followup.send("敵が殺せ！", ephemeral=True)
+                
+                # ログチャンネル通知
+                log_channel = self.bot.get_channel(self.LOG_CHANNEL_ID) or await self.bot.fetch_channel(self.LOG_CHANNEL_ID)
+                if log_channel:
+                    embed = discord.Embed(
+                        title="⚠️ 要注意人物の来訪 (コマンド経由)",
+                        description=f"お荷物リスト登録者が検出されました。",
+                        color=discord.Color.red()
+                    )
+                    embed.add_field(name="プレイヤー名", value=player_name, inline=True)
+                    embed.add_field(name="実行者", value=f"{interaction.user.mention} ({interaction.user.id})", inline=True)
+                    embed.set_footer(text=f"判定時刻: {datetime.now(JST).strftime('%Y/%m/%d %H:%M:%S')}")
+                    await log_channel.send(embed=embed)
+            else:
+                # OK判定: ロール付与
+                try:
+                    role = interaction.guild.get_role(self.SAFE_ROLE_ID)
+                    if role:
+                        await interaction.user.add_roles(role)
+                        await interaction.followup.send(f"✨ {role.name} ロールを付与しました！", ephemeral=True)
+                    else:
+                        await interaction.followup.send("✅ リストにはいませんが、付与するロールが見つかりませんでした。", ephemeral=True)
+                except Exception as role_err:
+                    print(f"❌ ロール付与失敗: {role_err}")
+                    await interaction.followup.send("⚠️ ロールの付与に失敗しました。ボットの権限を確認してください。", ephemeral=True)
+
+        except Exception as e:
+            await interaction.followup.send(f"❌ エラーが発生しました: {e}", ephemeral=True)
+            await send_error_to_owner(self.bot, config, "Check Command Error", e, f"User: {interaction.user.name}")
+
     @app_commands.command(name="player_edit", description="登録されたプレイヤー名を修正します（オーナーのみ）")
     @app_commands.autocomplete(old_name=name_autocomplete)
     async def player_edit_command(self, interaction: discord.Interaction, old_name: str, new_name: str):
@@ -441,6 +511,66 @@ class BrawlStarsCog(commands.Cog):
             await interaction.followup.send(f"❌ エラー: {e}")
             await send_error_to_owner(self.bot, config, "ScanHistory Error", e)
             print(f"❌ 一括登録エラー: {e}")
+
+    async def batch_check_history(self, limit=100):
+        """コンソールから呼び出される、チェック用チャンネルの一括スキャン"""
+        config = self.bot.config
+        target_channel = self.bot.get_channel(self.CHECK_CHANNEL_ID) or await self.bot.fetch_channel(self.CHECK_CHANNEL_ID)
+        
+        if not target_channel:
+            print(f"❌ Error: Check channel {self.CHECK_CHANNEL_ID} not found.")
+            return
+
+        print(f"🔍 Checking history in #{target_channel.name} (limit={limit})...")
+        
+        success_count = 0
+        role_count = 0
+        failed_count = 0
+        
+        try:
+            guild = target_channel.guild
+            safe_role = guild.get_role(self.SAFE_ROLE_ID)
+            
+            async for msg in target_channel.history(limit=limit):
+                if msg.author.bot: continue
+                if not msg.attachments: continue
+                
+                for attachment in msg.attachments:
+                    if attachment.content_type and attachment.content_type.startswith('image/'):
+                        result = await self.extract_brawlstars_name(attachment.url)
+                        if result and result['name']:
+                            player_name = result['name']
+                            is_hazard = player_name in config.player_names
+                            
+                            # 記録
+                            config.check_player_names[player_name] = {
+                                'name': player_name,
+                                'checked_at': msg.created_at.isoformat(),
+                                'user_id': msg.author.id,
+                                'batch': True,
+                                'is_hazard': is_hazard
+                            }
+                            config.check_player_register_count[player_name] = config.check_player_register_count.get(player_name, 0) + 1
+                            success_count += 1
+                            
+                            # ロール付与 (お荷物でない場合)
+                            if not is_hazard and safe_role:
+                                try:
+                                    # メンバーオブジェクトの取得
+                                    member = guild.get_member(msg.author.id) or await guild.fetch_member(msg.author.id)
+                                    if member and safe_role not in member.roles:
+                                        await member.add_roles(safe_role)
+                                        role_count += 1
+                                except Exception as re:
+                                    print(f"⚠️ Failed to grant role to {msg.author.name}: {re}")
+                        else:
+                            failed_count += 1
+                        break # 1メッセージ1枚まで
+            
+            config.save_check_player_names()
+            print(f"📊 Batch Check complete: {success_count} recorded, {role_count} roles granted, {failed_count} failed.")
+        except Exception as e:
+            print(f"❌ Batch Check error: {e}")
 
 async def setup(bot):
     await bot.add_cog(BrawlStarsCog(bot))
