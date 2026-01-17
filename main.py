@@ -76,25 +76,23 @@ class MyBot(commands.Bot):
                     await self.tree.sync()
                     print("✨ Reload complete!")
                 elif command.startswith("say "):
-                    # say <channel_id> <message>
-                    parts = line.strip().split(" ", 2)
-                    if len(parts) < 3:
-                        print("⚠️ Usage: say <channel_id> <message>")
+                    # say <message> (Channel ID fixed to 1379135420960604362)
+                    parts = line.strip().split(" ", 1)
+                    if len(parts) < 2:
+                        print("⚠️ Usage: say <message>")
                         continue
                     
-                    channel_id_str, say_content = parts[1], parts[2]
-                    if not channel_id_str.isdigit():
-                        print("❌ Error: Channel ID must be numeric.")
-                        continue
+                    say_content = parts[1]
+                    target_channel_id = 1379135420960604362
                     
-                    channel = self.get_channel(int(channel_id_str)) or await self.fetch_channel(int(channel_id_str))
+                    channel = self.get_channel(target_channel_id) or await self.fetch_channel(target_channel_id)
                     if channel:
                         await channel.send(say_content)
                         print(f"✅ Sent to #{channel.name}: {say_content}")
                     else:
-                        print(f"❌ Error: Channel {channel_id_str} not found.")
+                        print(f"❌ Error: Channel {target_channel_id} not found.")
                 elif command == "help":
-                    print("📋 Available console commands: reload, say <channel_id> <msg>, help")
+                    print("📋 Available console commands: reload, say <msg>, help")
                 elif command == "":
                     continue
                 else:
