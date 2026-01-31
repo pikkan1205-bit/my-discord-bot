@@ -83,7 +83,7 @@ class BrawlStarsCog(commands.Cog):
             try:
                 with open(self.SCAN_HISTORY_FILE, "r", encoding="utf-8") as f:
                     data = json_lib.load(f)
-                    # keyをint型に戻す
+                    # keyをint型に戻す (GLOBAL_KEY=0も含む)
                     return {int(k): v for k, v in data.items()}
             except:
                 pass
@@ -216,6 +216,11 @@ class BrawlStarsCog(commands.Cog):
                     await self.message.delete()
                 except:
                     pass
+            if self.new_message:
+                try:
+                    await self.new_message.delete()
+                except:
+                    pass
 
         @discord.ui.button(label="はい", style=discord.ButtonStyle.green)
         async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -324,6 +329,18 @@ class BrawlStarsCog(commands.Cog):
                 btn = self.AccountButton(name)
                 self.add_item(btn)
 
+        async def on_timeout(self):
+            if self.message:
+                try:
+                    await self.message.delete()
+                except:
+                    pass
+            if self.new_message:
+                try:
+                    await self.new_message.delete()
+                except:
+                    pass
+
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             if interaction.user.id != self.user_id:
                 await interaction.response.send_message("本人以外は操作できません。", ephemeral=True)
@@ -416,8 +433,8 @@ class BrawlStarsCog(commands.Cog):
 
     async def cleanup_user_errors(self, user_id: int):
         """ユーザーの古いエラーメッセージがあれば削除する"""
-        if user_id in self.pending_error_messages:
-            prev_err = self.pending_error_messages.pop(user_id)
+        prev_err = self.pending_error_messages.pop(user_id, None)
+        if prev_err:
             try:
                 await prev_err.delete()
             except:
@@ -479,7 +496,7 @@ class BrawlStarsCog(commands.Cog):
             GLOBAL_KEY = 0
             
             # 履歴の読み込みとクリーンアップ
-            history_data = self.scan_history.get(str(GLOBAL_KEY), {"flash": [], "lite": [], "vision": []})
+            history_data = self.scan_history.get(GLOBAL_KEY, {"flash": [], "lite": [], "vision": []})
             if not isinstance(history_data, dict) or "flash" not in history_data: # データ移行用
                 history_data = {"flash": [], "lite": [], "vision": []}
 
@@ -545,10 +562,10 @@ class BrawlStarsCog(commands.Cog):
                         
                         err_msg = await message.channel.send(f"{message.author.mention} {error_message}", delete_after=180)
                         self.pending_error_messages[message.author.id] = err_msg
-                        # このメッセージ内の残りの画像もスキップするか、個別に判断するか
-                        self.queue_count -= 1
+                        # このメッセージ内の残りの画像もスキップ
+                        self.queue_count -= len(valid_images[valid_images.index(attachment):])
                         await self.update_queue_status(message.channel)
-                        continue
+                        break
 
                     async with self.queue_semaphore:
                         print(f"🚀 画像解析開始: {attachment.filename} (Queue: {self.queue_count})")
@@ -713,12 +730,24 @@ class BrawlStarsCog(commands.Cog):
                     
                     # 保存 (WebP, quality=75)
                     img_rgb.save(save_path, "WEBP", quality=75)
+                    img_rgb.close()
                 return True
 
             await asyncio.to_thread(process_and_save)
             print(f"💾 画像を保存しました: {filename}")
         except Exception as e:
             print(f"❌ 画像保存エラー ({attachment.filename}): {e}")
+
+    async def batch_collect_images_command(self, interaction: discord.Interaction, target: str, limit: int = 500):
+        """過去の画像をチャンネル履歴から取得・保存する (管理者用)"""
+        config = self.bot.config
+        if interaction.user.id != config.OWNER_ID and interaction.user.id not in config.ADMIN_IDS:
+            await interaction.response.send_message("管理者のみ実行可能です。", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        await self.batch_collect_images(target, limit)
+        await interaction.followup.send(f"✅ {target} の画像収集が完了しました。", ephemeral=True)
 
     async def batch_collect_images(self, target: str, limit=500):
         """過去の画像をチャンネル履歴から取得・保存する (コンソール用)"""
@@ -766,7 +795,7 @@ class BrawlStarsCog(commands.Cog):
             # 各エンジンの実行前にカウント制限を再チェック（ループ内での動的切り替え用）
             async with self.lock:
                 now = datetime.now(JST).timestamp()
-                hist_data = self.scan_history.get("0", {"flash": [], "lite": [], "vision": []})
+                hist_data = self.scan_history.get(0, {"flash": [], "lite": [], "vision": []})
                 
                 if engine == "flash":
                     h = [ts for ts in hist_data.get("flash", []) if now - ts < 86400]
@@ -798,9 +827,9 @@ class BrawlStarsCog(commands.Cog):
                     # 成功時にカウントを増やす
                     async with self.lock:
                         now = datetime.now(JST).timestamp()
-                        hist_data = self.scan_history.get("0", {"flash": [], "lite": [], "vision": []})
+                        hist_data = self.scan_history.get(0, {"flash": [], "lite": [], "vision": []})
                         hist_data[engine].append(now)
-                        self.scan_history["0"] = hist_data
+                        self.scan_history[0] = hist_data
                         self.save_scan_history()
                     
                     print(f"📊 画像解析成功: 使用モデル = {engine.upper()}")
@@ -911,7 +940,8 @@ class BrawlStarsCog(commands.Cog):
         result = {'name': None, 'player_id': 'Unknown', 'sc_id': 'Unknown'}
         
         # プレイヤー名 (既存のロジックを流用)
-        name_res, _, _ = await self.extract_brawlstars_name(image_url)
+        # 二重フェッチを避けるため annotations を直接渡す
+        name_res, _, _ = await self.extract_brawlstars_name_from_annotations(annotations)
         if name_res:
              result['name'] = name_res['name']
         
@@ -929,6 +959,12 @@ class BrawlStarsCog(commands.Cog):
             
         if sc_id_match:
             result['sc_id'] = sc_id_match.group(0)
+        else:
+            # 緩和された正規表現: 大文字のみや2単語などもカバー
+            # 例: HungryNebula, HEROICNEBULA, BrawlStarsPlayer
+            sc_id_match = re.search(r'[A-Z0-9]{3,}', full_text)
+            if sc_id_match:
+                 result['sc_id'] = sc_id_match.group(0)
             
         # プレイヤー名の正規化 (Vision フォールバック用)
         if result.get('name'):
@@ -973,6 +1009,9 @@ class BrawlStarsCog(commands.Cog):
 
     async def extract_brawlstars_name(self, image_url: str) -> tuple[Optional[dict], Optional[str], bool]:
         annotations = await self.extract_text_from_image(image_url)
+        return await self.extract_brawlstars_name_from_annotations(annotations)
+
+    async def extract_brawlstars_name_from_annotations(self, annotations: List[vision.EntityAnnotation]) -> tuple[Optional[dict], Optional[str], bool]:
         if not annotations:
             return None, None, False
         
@@ -1359,8 +1398,10 @@ class BrawlStarsCog(commands.Cog):
 
         config.player_names[new_name] = config.player_names.pop(old_name)
         config.player_names[new_name]['name'] = new_name
-        if old_name in config.player_register_count:
-            config.player_register_count[new_name] = config.player_register_count.pop(old_name)
+        
+        # カウント情報の移行と初期化漏れ防止
+        old_count = config.player_register_count.pop(old_name, 1)
+        config.player_register_count[new_name] = old_count
 
         config.save_player_names()
         await interaction.response.send_message(f"✅ 修正完了：`{old_name}` → `{new_name}`")
