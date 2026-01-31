@@ -14,10 +14,16 @@ class ConfigManager:
         self.PLAYER_NAMES_FILE = "player_names.json"
         self.CHECK_PLAYER_NAMES_FILE = "check_player_names.json"
         
-        # Admin Mode Settings
+        # 画像保存設定
+        self.IMAGE_BASE_DIR = "images"
+        self.REPORT_IMAGES_DIR = os.path.join(self.IMAGE_BASE_DIR, "reports")
+        self.CHECK_IMAGES_DIR = os.path.join(self.IMAGE_BASE_DIR, "checks")
+        self._ensure_dirs()
+        
+        # 管理者モードの設定
         self.ADMIN_MODE_TIMEOUT = 120  # 2分（秒）
         
-        # State
+        # 状態
         self.OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
         self.ADMIN_IDS: Set[int] = set()
         self.BLOCKED_USERS: Set[int] = set()
@@ -25,15 +31,26 @@ class ConfigManager:
         self.vc_block_enabled: bool = True
         self.AUTO_PING_CHANNEL_ID: int = int(os.environ.get("AUTO_PING_CHANNEL_ID", "0"))
         
-        # BrawlStars Data
-        self.player_names: Dict = {}
+        # レート制限設定 (ブロスタ)
+        # Gemini Flash: 1時間10件、1日20件
+        self.RATELIMIT_FLASH_1H = 10
+        self.RATELIMIT_FLASH_24H = 20
+        # Gemini Lite: 1時間10件、1日20件
+        self.RATELIMIT_LITE_1H = 10
+        self.RATELIMIT_LITE_24H = 20
+        # Vision: 1時間15件、1日50件 (バックアップ用)
+        self.RATELIMIT_VISION_1H = 15
+        self.RATELIMIT_VISION_24H = 50
+        
+        # ブロスタデータ
+        self.player_names = {}
         self.player_register_count: Dict = {}
         
-        # Check Results Data
-        self.check_player_names: Dict = {}
+        # チェック結果データ
+        self.check_player_names = {}
         self.check_player_register_count: Dict = {}
         
-        # Admin Mode State {user_id: timestamp}
+        # 管理者モードの状態 {user_id: timestamp}
         self.admin_mode_users: Dict = {}
         
         # Initial Load
@@ -46,7 +63,7 @@ class ConfigManager:
         self.validate_settings()
 
     def load_env_initials(self):
-        """Load initial values from environment variables if set"""
+        """環境変数が設定されている場合、初期値をロードします"""
         # 初期対象ユーザー（カンマ区切りで複数指定可能）
         blocked_str = os.environ.get("INITIAL_BLOCKED_USERS", "")
         if blocked_str and not self.BLOCKED_USERS: # only if empty
@@ -73,7 +90,13 @@ class ConfigManager:
             "blocked_users": list(self.BLOCKED_USERS),
             "target_vc_ids": list(self.TARGET_VC_IDS),
             "vc_block_enabled": self.vc_block_enabled,
-            "auto_ping_channel_id": self.AUTO_PING_CHANNEL_ID
+            "auto_ping_channel_id": self.AUTO_PING_CHANNEL_ID,
+            "ratelimit_flash_1h": self.RATELIMIT_FLASH_1H,
+            "ratelimit_flash_24h": self.RATELIMIT_FLASH_24H,
+            "ratelimit_lite_1h": self.RATELIMIT_LITE_1H,
+            "ratelimit_lite_24h": self.RATELIMIT_LITE_24H,
+            "ratelimit_vision_1h": self.RATELIMIT_VISION_1H,
+            "ratelimit_vision_24h": self.RATELIMIT_VISION_24H
         }
         try:
             temp_file = f"{self.CONFIG_FILE}.tmp"
@@ -97,6 +120,12 @@ class ConfigManager:
                 self.TARGET_VC_IDS = set(config.get("target_vc_ids", []))
                 self.vc_block_enabled = config.get("vc_block_enabled", True)
                 self.AUTO_PING_CHANNEL_ID = config.get("auto_ping_channel_id", 0)
+                self.RATELIMIT_FLASH_1H = config.get("ratelimit_flash_1h", 10)
+                self.RATELIMIT_FLASH_24H = config.get("ratelimit_flash_24h", 20)
+                self.RATELIMIT_LITE_1H = config.get("ratelimit_lite_1h", 10)
+                self.RATELIMIT_LITE_24H = config.get("ratelimit_lite_24h", 20)
+                self.RATELIMIT_VISION_1H = config.get("ratelimit_vision_1h", 15)
+                self.RATELIMIT_VISION_24H = config.get("ratelimit_vision_24h", 50)
                 print(f"📂 設定を読み込みました")
             else:
                 print(f"⚠️ 設定ファイルが見つかりません。初期値を使用します")
@@ -221,3 +250,10 @@ class ConfigManager:
         """管理者モードから抜ける"""
         if user_id in self.admin_mode_users:
             del self.admin_mode_users[user_id]
+
+    def _ensure_dirs(self):
+        """必要なディレクトリを作成"""
+        for d in [self.REPORT_IMAGES_DIR, self.CHECK_IMAGES_DIR]:
+            if not os.path.exists(d):
+                os.makedirs(d)
+                print(f"📁 ディレクトリを作成しました: {d}")

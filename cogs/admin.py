@@ -7,7 +7,7 @@ from typing import Optional, Union
 
 from utils.helpers import normalize_text, normalize_synonyms, has_any
 from utils.discord_helpers import log_to_owner, send_error_to_owner
-# Note: config is accessed via self.bot.config
+# 設定は self.bot.config 経由でアクセスされます
 
 # 日本時間のタイムゾーン
 JST = timezone(timedelta(hours=9))
@@ -15,7 +15,7 @@ JST = timezone(timedelta(hours=9))
 class AdminCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.check_admin_mode_timeout.start()  # Loop check
+        self.check_admin_mode_timeout.start()  # 管理者モードのタイムアウトチェックを開始
 
     def cog_unload(self):
         self.check_admin_mode_timeout.cancel()
@@ -83,8 +83,14 @@ class AdminCog(commands.Cog):
         # ※ ここは全ユーザー対象ではなくオーナーのみなので注意
         content = message.content
         normalized = normalize_text(content)
+        
+        # 除外処理: 「トロフィー」という単語に含まれる「フィーロ」などを誤検知しないように一時的に置換
+        # トロフィー、とろふぃー、ﾄﾛﾌｨｰ 全てを対象
+        import re
+        temp_normalized = re.sub(r"トロフィー|とろふぃー|ﾄﾛﾌｨｰ", "---", normalized)
+        
         firo_keywords = ["フィーロちゃん", "ふぃーろちゃん", "フィーロ", "ふぃーろ"]
-        firo_called = any(normalize_text(k) in normalized for k in firo_keywords)
+        firo_called = any(normalize_text(k) in temp_normalized for k in firo_keywords)
         
         if firo_called:
             if message.author.id == config.OWNER_ID:
@@ -151,7 +157,7 @@ class AdminCog(commands.Cog):
                         config.ADMIN_IDS.add(user.id)
                         config.save_config()
                         await message.reply(f"{user.mention} を管理者に追加したよ！")
-                        return True
+                        return True # 処理終了
             
             # ===== 管理者削除 =====
             if has_any(unified, admin_add_keywords) and has_any(unified, REMOVE_KEYWORDS):
@@ -160,7 +166,7 @@ class AdminCog(commands.Cog):
                     config.ADMIN_IDS.discard(user.id)
                     config.save_config()
                     await message.reply(f"{user.mention} を管理者から削除したよ！")
-                    return True
+                    return True # 処理終了
             
             # ===== autoping設定 =====
             autoping_keywords = ["autoping", "オートピング", "おーとぴんぐ", "自動ピング", "自動ping", "オートping", "自動通知", "ping通知"]
@@ -169,14 +175,14 @@ class AdminCog(commands.Cog):
                     config.AUTO_PING_CHANNEL_ID = 0
                     config.save_config()
                     await message.reply("オートピングを無効化したよ！")
-                    return True
+                    return True # 処理終了
                 if has_any(unified, ON_KEYWORDS + ["設定", "セット", "変更", "指定"]):
                     if message.channel_mentions:
                         channel = message.channel_mentions[0]
                         config.AUTO_PING_CHANNEL_ID = channel.id
                         config.save_config()
                         await message.reply("オートピングを設定したよ！")
-                        return True
+                        return True # 処理終了
             
             # ===== VC出禁追加 =====
             block_keywords = ["出禁", "ブロック", "ban", "バン", "追放", "キック", "締め出し", "入室禁止", "参加禁止", "vcブロック", "vcban"]
@@ -186,7 +192,7 @@ class AdminCog(commands.Cog):
                     config.BLOCKED_USERS.add(user.id)
                     config.save_config()
                     await message.reply(f"{user.mention} を出禁にしたよ！")
-                    return True
+                    return True # 処理終了
             
             # ===== VC出禁解除 =====
             if has_any(unified, block_keywords) and has_any(unified, REMOVE_KEYWORDS):
@@ -195,7 +201,7 @@ class AdminCog(commands.Cog):
                     config.BLOCKED_USERS.discard(user.id)
                     config.save_config()
                     await message.reply(f"{user.mention} を出禁から解除したよ！")
-                    return True
+                    return True # 処理終了
             
             # ===== 監視対象追加 =====
             watch_keywords = ["監視", "ウォッチ", "watch", "対象", "見張り", "チェック対象", "vc対象", "チャンネル対象"]
@@ -207,7 +213,7 @@ class AdminCog(commands.Cog):
                         config.TARGET_VC_IDS.add(vc_id)
                         config.save_config()
                         await message.reply(f"チャンネルID {vc_id} を監視対象に追加したよ！")
-                        return True
+                        return True # 処理終了
             
             # ===== 監視対象削除 =====
             if has_any(unified, watch_keywords) and has_any(unified, REMOVE_KEYWORDS):
@@ -217,7 +223,7 @@ class AdminCog(commands.Cog):
                     config.TARGET_VC_IDS.discard(vc_id)
                     config.save_config()
                     await message.reply(f"チャンネルID {vc_id} を監視対象から削除したよ！")
-                    return True
+                    return True # 処理終了
             
              # ===== チャット削除 =====
             chat_keywords = ["チャット", "メッセージ", "発言", "ログ", "履歴", "会話", "投稿", "掃除", "クリア", "clear"]
@@ -230,7 +236,7 @@ class AdminCog(commands.Cog):
                     if isinstance(message.channel, discord.TextChannel):
                         await message.channel.purge(limit=limit + 1)
                         await message.channel.send("お掃除完了！綺麗になったね！", delete_after=5)
-                        return True
+                        return True # 処理終了
             
             # ===== DM送信 =====
             dm_keywords = ["dm", "ダイレクトメッセージ", "ディーエム", "プライベートメッセージ", "個人メッセージ"]
@@ -253,7 +259,7 @@ class AdminCog(commands.Cog):
                         await message.reply("メッセージを送信したよ！")
                     except:
                         await message.reply("DMの送信に失敗したよ...")
-                    return True
+                    return True # 処理終了
             
             # ===== ヘルプ =====
             help_keywords = ["ヘルプ", "困った", "help", "使い方", "わからない", "教えて", "どうすれば", "何ができる", "コマンド一覧", "機能一覧"]
@@ -275,11 +281,11 @@ class AdminCog(commands.Cog):
                 if has_any(unified, ["表示", "見せて", "確認", "教えて", "見たい", "知りたい"]) or ("リスト" in unified):
                     await message.reply("リストを表示するね！")
                     
-                    user_list = [] # Initialize user_list here
+                    user_list = [] # ユーザーリストをここで初期化
                     if config.BLOCKED_USERS:
                         for uid in config.BLOCKED_USERS:
                             try:
-                                user = self.bot.get_user(uid) or await self.bot.fetch_user(uid) # Use get_user first
+                                user = self.bot.get_user(uid) or await self.bot.fetch_user(uid) # 最初にget_userを使用
                                 user_list.append(f"• {user.name} ({uid})")
                             except:
                                 user_list.append(f"• 不明なユーザー ({uid})")
@@ -360,9 +366,9 @@ class AdminCog(commands.Cog):
                     results.append(f"⚠️ レイテンシ: {latency}ms（高め）")
                     all_ok = False
                 
-                # Config checks
+                # 設定チェック
                 try:
-                    config.load_config() # Reload to check
+                    config.load_config() # 読み込み可能かリロードして確認
                     results.append("✅ 設定ファイル: 読み込み可能")
                 except:
                     results.append("❌ 設定ファイル: エラー")
@@ -381,7 +387,6 @@ class AdminCog(commands.Cog):
                 return True
             
             # ===== フォールバック処理 =====
-            # Fallback (Loose matches) - REMOVED or STRENGTHENED
             # 曖昧な「削除」「追加」だけの発言による誤爆を防ぐため、
             # 対象が明確でない場合の処理を削除、または厳格化
             
@@ -438,7 +443,7 @@ class AdminCog(commands.Cog):
         config = self.bot.config
         if interaction.user.id != config.OWNER_ID:
             await interaction.response.send_message("このコマンドはオーナーのみが使用できます。", ephemeral=True)
-            await log_to_owner(self.bot, config, "error", interaction.user, "/addadmin", "Unauthorized access attempt")
+            await log_to_owner(self.bot, config, "error", interaction.user, "/addadmin", "不正なアクセスの試行")
             return
         
         if user.id == interaction.user.id:
@@ -462,7 +467,7 @@ class AdminCog(commands.Cog):
         config = self.bot.config
         if interaction.user.id != config.OWNER_ID:
             await interaction.response.send_message("このコマンドはオーナーのみが使用できます。", ephemeral=True)
-            await log_to_owner(self.bot, config, "error", interaction.user, "/removeadmin", "Unauthorized access attempt")
+            await log_to_owner(self.bot, config, "error", interaction.user, "/removeadmin", "不正なアクセスの試行")
             return
         
         if user.id not in config.ADMIN_IDS:
@@ -481,7 +486,7 @@ class AdminCog(commands.Cog):
         config = self.bot.config
         if interaction.user.id != config.OWNER_ID:
             await interaction.response.send_message("このコマンドはオーナーのみが使用できます。", ephemeral=True)
-            await log_to_owner(self.bot, config, "error", interaction.user, "/listadmin", "Unauthorized access attempt")
+            await log_to_owner(self.bot, config, "error", interaction.user, "/listadmin", "不正なアクセスの試行")
             return
         
         admin_list = "なし"
@@ -510,7 +515,7 @@ class AdminCog(commands.Cog):
         config = self.bot.config
         if interaction.user.id != config.OWNER_ID:
             await interaction.response.send_message("このコマンドはオーナーのみが使用できます。", ephemeral=True)
-            await log_to_owner(self.bot, config, "error", interaction.user, "/exit", "Unauthorized access attempt")
+            await log_to_owner(self.bot, config, "error", interaction.user, "/exit", "不正なアクセスの試行")
             return
         
         if config.is_in_admin_mode(interaction.user.id):
@@ -518,6 +523,37 @@ class AdminCog(commands.Cog):
             await interaction.response.send_message("✅ 管理者モードを終了しました", ephemeral=True)
         else:
             await interaction.response.send_message("ℹ️ 管理者モードは起動していません", ephemeral=True)
+
+    @app_commands.command(name="dog", description="特定のロールを付与/解除（オーナー・管理者のみ）")
+    async def dog_command(self, interaction: discord.Interaction):
+        config = self.bot.config
+        if not config.is_authorized(interaction.user.id):
+            await interaction.response.send_message("このコマンドはオーナーまたは管理者のみが使用できます。", ephemeral=True)
+            return
+
+        role_id = 1435275054672777257
+        role = interaction.guild.get_role(role_id)
+        
+        if not role:
+            await interaction.response.send_message(f"エラー: ロールID `{role_id}` が見つかりませんでした。", ephemeral=True)
+            return
+
+        try:
+            if role in interaction.user.roles:
+                await interaction.user.remove_roles(role)
+                await interaction.response.send_message(f"✅ {role.name} を解除したよ！", ephemeral=True)
+            else:
+                await interaction.user.add_roles(role)
+                await interaction.response.send_message(f"✅ {role.name} を付与したよ！", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "❌ エラー: ロールを操作する権限がありません。\n"
+                "ボットのロールが、付与しようとしているロールよりも上位にあることを確認してください。",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(f"❌ 予期しないエラーが発生しました: {e}", ephemeral=True)
+
 
 async def setup(bot):
     await bot.add_cog(AdminCog(bot))

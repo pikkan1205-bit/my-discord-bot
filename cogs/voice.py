@@ -255,7 +255,7 @@ class VoiceCog(commands.Cog):
         config = self.bot.config
         if interaction.user.id != config.OWNER_ID:
             await interaction.response.send_message("このコマンドはオーナーのみが使用できます。", ephemeral=True)
-            await log_to_owner(self.bot, config, "error", interaction.user, "/simvc", "Unauthorized access attempt")
+            await log_to_owner(self.bot, config, "error", interaction.user, "/simvc", "不正なアクセスの試行")
             return
         
         await interaction.response.defer(ephemeral=True)

@@ -1,15 +1,16 @@
 import re
 
 def normalize_text(text: str) -> str:
-    """テキストを正規化（スペース除去、小文字化）"""
-    text = text.replace(" ", "").replace("　", "")
+    """テキストを正規化（全ての空白文字・改行を除去、小文字化）"""
+    import re
+    text = re.sub(r"\s+", "", text)
     return text.lower()
 
 def has_any(text: str, keywords: list) -> bool:
     """キーワードのいずれかが含まれるか"""
     return any(k in text for k in keywords)
 
-# Synonyms Dictionary (Module Level)
+# 類義語辞書 (モジュールレベル)
 SYNONYMS = {
     # autoping
     "オートピング": "autoping", "おーとぴんぐ": "autoping", "自動ピング": "autoping",
@@ -46,8 +47,8 @@ SYNONYMS = {
     "ボイスチャンネル": "vc", "ボイチャ": "vc", "通話": "vc", "ボイス": "vc", "音声チャンネル": "vc",
 }
 
-# Compile regex pattern for faster replacement
-# Sort by length (descending) to match longest keys first (e.g. avoid matching "apple" inside "applepie" if both existed)
+# 置換を高速化するための正規表現パターンをコンパイル
+# 長さ順（降順）にソートして、長いキーを先にマッチさせる（例：両方存在する場合に "applepie" の中の "apple" にマッチするのを避けるため）
 sorted_keys = sorted(SYNONYMS.keys(), key=len, reverse=True)
 SYNONYM_PATTERN = re.compile("|".join(map(re.escape, sorted_keys)), re.IGNORECASE)
 
@@ -58,29 +59,29 @@ def has_any(text: str, keywords: list) -> bool:
     return any(k in text for k in keywords)
 
 def normalize_synonyms(text: str) -> str:
-    """類義語を統一形に正規化 (Regex Optimized)"""
+    """類義語を統一形に正規化 (正規表現で最適化)"""
     return SYNONYM_PATTERN.sub(lambda m: SYNONYMS[m.group(0).lower()], text.lower())
 
 def run_unit_tests() -> list[str]:
     """ヘルパー関数の単体テストを実行"""
     results = []
     try:
-        # Test 1: normalize_text
-        assert normalize_text(" A  B　C ") == "abc", "normalize_text failed"
-        results.append("✅ Test: normalize_text")
+        # テスト 1: normalize_text
+        assert normalize_text(" A  B　C ") == "abc", "normalize_text が失敗しました"
+        results.append("✅ テスト: normalize_text")
 
-        # Test 2: normalize_synonyms
-        assert normalize_synonyms("オートpingを有効にして") == "autopingをオンにして", "normalize_synonyms failed (1)"
-        assert normalize_synonyms("ボイチャでBAN") == "vcで出禁", "normalize_synonyms failed (2)"
-        results.append("✅ Test: normalize_synonyms")
+        # テスト 2: normalize_synonyms
+        assert normalize_synonyms("オートpingを有効にして") == "autopingをオンにして", "normalize_synonyms が失敗しました (1)"
+        assert normalize_synonyms("ボイチャでBAN") == "vcで出禁", "normalize_synonyms が失敗しました (2)"
+        results.append("✅ テスト: normalize_synonyms")
 
-        # Test 3: has_any
-        assert has_any("あいうえお", ["か", "う"]), "has_any failed"
-        results.append("✅ Test: has_any")
+        # テスト 3: has_any
+        assert has_any("あいうえお", ["か", "う"]), "has_any が失敗しました"
+        results.append("✅ テスト: has_any")
 
     except AssertionError as e:
-        results.append(f"❌ Test Failed: {e}")
+        results.append(f"❌ テスト失敗: {e}")
     except Exception as e:
-        results.append(f"❌ Test Error: {e}")
+        results.append(f"❌ テストエラー: {e}")
     
     return results

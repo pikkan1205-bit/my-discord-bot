@@ -2,35 +2,47 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 from datetime import datetime, timezone, timedelta, time
-import sys
 import traceback
+import psutil
+import os
+import gc
+import asyncio # 不足していたインポートを追加
 from typing import Optional
 
 from utils.discord_helpers import send_error_to_owner, log_to_owner
-from utils.helpers import run_unit_tests # Added import
+from utils.helpers import run_unit_tests # インポートを追加
 
-# Note: config is accessed via self.bot.config
+# 設定は self.bot.config 経由でアクセスされます
 
 JST = timezone(timedelta(hours=9))
 
 class SystemCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.daily_ping.start()
+        # リクエストにより廃止
+        self.status_updater.start()
+        # 0:00チェックのトリガーは依然として必要です
+        self.midnight_check.start()
 
     def cog_unload(self):
-        self.daily_ping.cancel()
+        # self.daily_ping.cancel()
+        self.status_updater.cancel()
+        self.midnight_check.cancel()
 
     # ====== Global Error Handler (Listeners) ======
     @commands.Cog.listener()
     async def on_command_error(self, ctx, error):
-        # Traditional command error handler (if needed)
+        # 従来のコマンドエラーハンドラー（必要な場合）
         pass
 
     # ====== Tasks ======
     @tasks.loop(time=time(hour=15, minute=0, second=0))  # UTC 15:00 = JST 0:00
-    async def daily_ping(self):
-        """日本時間0時に自動でpingを送信"""
+    async def midnight_check(self):
+        """日本時間0時に自動で実行される定期チェック"""
+        if not self.bot:
+            return
+        await self.bot.wait_until_ready()
+        
         config = self.bot.config
         if config.AUTO_PING_CHANNEL_ID == 0:
             return
@@ -38,40 +50,86 @@ class SystemCog(commands.Cog):
         try:
             channel = self.bot.get_channel(config.AUTO_PING_CHANNEL_ID)
             if channel is None:
-                print(f"❌ 自動ping: チャンネルが見つかりません (ID: {config.AUTO_PING_CHANNEL_ID})")
+                # print(f"❌ 0時チェック: チャンネルが見つかりません (ID: {config.AUTO_PING_CHANNEL_ID})")
                 return
             
-            latency = round(self.bot.latency * 1000)
-            current_time = datetime.now(JST).strftime("%Y年%m月%d日 %H:%M:%S")
-            
-            embed = discord.Embed(
-                title="🏓 Daily Ping",
-                description=f"レイテンシ: **{latency}ms**\n\n-# このメッセージはReplit.comによって自動実行されています",
-                color=discord.Color.green() if latency < 200 else discord.Color.orange()
-            )
-            embed.set_footer(text=f"自動実行: {current_time}")
-            
-            await channel.send(embed=embed)
-            print(f"✅ 自動ping送信完了 [{current_time}]")
-            
-            # 自動テストも実行
+            # システムテストを実行してメッセージを送信
             await self.run_daily_test(channel)
+            # print(f"✅ 0時定期チェック完了 [{datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')}]")
         except Exception as e:
-            print(f"❌ 自動ping送信失敗: {e}")
+            print(f"❌ 0時定期チェック失敗: {e}")
+
+    @tasks.loop(minutes=1.0)
+    async def status_updater(self):
+        """ボットのステータス（Presence）を定期的に更新"""
+        if not self.bot:
+            return
+        await self.bot.wait_until_ready()
+        
+        try:
+            # CPU使用率 (interval=None だと前回の呼び出しからの平均)
+            cpu_usage = psutil.cpu_percent()
+            
+            # メモリ使用量 (現在のプロセスのみ)
+            process = psutil.Process(os.getpid())
+            mem_info = process.memory_info()
+            mem_mb = mem_info.rss / 1024 / 1024
+            
+            # ステータスメッセージを作成
+            status_text = f"CPU: {cpu_usage}% | RAM: {int(mem_mb)}MB"
+            
+            # Presence を更新
+            activity = discord.Game(name=status_text)
+            await self.bot.change_presence(activity=activity)
+            # print(f"📊 Status Updated: {status_text}")
+        except Exception as e:
+            print(f"❌ ステータス更新失敗: {e}")
+
+    async def memory_cleanup(self) -> float:
+        """メモリを解放し、解放された量(MB)を返す"""
+        process = psutil.Process(os.getpid())
+        mem_before = process.memory_info().rss / 1024 / 1024
+        
+        # 1. 各Cogのクリーンアップを呼び出し
+        # BrawlStarsCogの処理
+        cog_bs = self.bot.get_cog("BrawlStarsCog")
+        if cog_bs:
+             # キャッシュクリアなどを検討（現在は特になし）
+             pass
+        
+        # ChatCogの処理
+        cog_chat = self.bot.get_cog("ChatCog")
+        if cog_chat:
+            # セッションのクリーンアップは通常tasks.loopだが、手動でコルーチンとして呼べるか確認
+            # もしLoopなら、内部のロジックを手動で実行するか、あるいは単にgcに任せる
+            if asyncio.iscoroutinefunction(cog_chat.session_cleanup):
+                await cog_chat.session_cleanup()
+        
+        # 2. ガベージコレクション
+        gc.collect()
+        
+        mem_after = process.memory_info().rss / 1024 / 1024
+        released = mem_before - mem_after
+        return max(0.0, released)
 
     async def run_daily_test(self, channel):
         """日本時間0時に自動でシステムテストを実行"""
         try:
+            # メモリ解放を最初に実行
+            released_mb = await self.memory_cleanup()
+            
             config = self.bot.config
             current_time = datetime.now(JST).strftime("%Y年%m月%d日 %H:%M:%S")
             results = []
+            has_error = False
             
             # 1. レイテンシチェック
             latency = round(self.bot.latency * 1000)
-            if latency < 200:
+            if latency < 150: # ユーザーが「正常」の閾値として150を要求
                 results.append(f"✅ レイテンシ: {latency}ms")
             else:
                 results.append(f"⚠️ レイテンシ: {latency}ms（高め）")
+                # has_error = True # レイテンシだけで「システム障害」とは言えないかもしれないが、ユーザーが150と言及したため
             
             # 2. 設定ファイル読み書きチェック
             try:
@@ -79,27 +137,54 @@ class SystemCog(commands.Cog):
                 results.append("✅ 設定ファイル: 読み込み可能")
             except Exception as e:
                 results.append(f"❌ 設定ファイル: {e}")
-            
-            results.append(f"✅ VC自動切断機能: {'ON' if config.vc_block_enabled else 'OFF'}")
-            results.append(f"✅ 対象ユーザー数: {len(config.BLOCKED_USERS)}人")
-            results.append(f"✅ 対象VC数: {len(config.TARGET_VC_IDS)}個")
-            results.append(f"✅ 管理者数: {len(config.ADMIN_IDS)}人")
+                has_error = True
             
             # 3. 単体テスト
             test_results = run_unit_tests()
             results.extend(test_results)
-            
-            embed = discord.Embed(
-                title="🔧 Daily System Check",
-                description="\n".join(results) + "\n\n-# このメッセージはReplit.comによって自動実行されています",
-                color=discord.Color.green()
-            )
-            embed.set_footer(text=f"自動実行: {current_time}")
-            
-            await channel.send(embed=embed)
-            print(f"✅ 自動テスト送信完了 [{current_time}]")
+            if any(r.startswith("❌") for r in test_results):
+                has_error = True
+
+            # 条件チェック: エラーがなく、レイテンシが150ms以下の場合
+            if not has_error and latency <= 150:
+                # 簡潔なメッセージ形式 (Embedを使用して「枠」をつける)
+                reported_count = len(config.player_names)
+                # checked_count = len(config.check_player_names) 
+                # ユーザーが手動編集でこのラベルを「サーバーに登録されている総アカウント数」に変更しました
+                checked_count = len(config.check_player_names)
+                
+                embed = discord.Embed(
+                    title="✨ **システムステータス報告** ✨",
+                    description=(
+                        f"📶 レイテンシ: **{latency}ms**\n"
+                        f"👥 報告されたプレイヤー数: **{reported_count}**\n"
+                        f"🔍 サーバーに登録されている総アカウント数: **{checked_count}**\n"
+                        f"🧹 メモリ解放量: **{released_mb:.1f}MB**\n\n"
+                        "✅ **すべてのシステムは正常に稼働しています**"
+                    ),
+                    color=discord.Color.green()
+                )
+                embed.set_footer(text=f"Sparkedhost.com 自動実行 | {current_time}")
+                await channel.send(embed=embed)
+            else:
+                # 異常がある場合は詳細を表示
+                results.append(f"✅ メモリ解放: {released_mb:.1f}MB")
+                results.append(f"✅ VC自動切断機能: {'ON' if config.vc_block_enabled else 'OFF'}")
+                results.append(f"✅ 対象ユーザー数: {len(config.BLOCKED_USERS)}人")
+                results.append(f"✅ 対象VC数: {len(config.TARGET_VC_IDS)}個")
+                
+                embed = discord.Embed(
+                    title="🔧 デイリーシステムチェック (詳細/アラート)",
+                    description="\n".join(results),
+                    color=discord.Color.orange() if not has_error else discord.Color.red()
+                )
+                embed.set_footer(text=f"Sparkedhost.com 自動実行 | {current_time}")
+                await channel.send(embed=embed)
+                
+            print(f"✅ システムチェック送信完了 [{current_time}] (解放: {released_mb:.1f}MB)")
         except Exception as e:
-            print(f"❌ 自動テスト送信失敗: {e}")
+            print(f"❌ システムチェック送信失敗: {e}")
+            traceback.print_exc()
 
     # ====== Commands ======
     @app_commands.command(name="ping", description="ボットの応答速度をテスト")
@@ -133,47 +218,10 @@ class SystemCog(commands.Cog):
             await log_to_owner(self.bot, config, "error", interaction.user, "/test", "Unauthorized access attempt")
             return
         
-        await interaction.response.defer()
-        results = []
-        
-        # 1. レイテンシ
-        latency = round(self.bot.latency * 1000)
-        results.append(f"✅ レイテンシ: {latency}ms" if latency < 200 else f"⚠️ レイテンシ: {latency}ms（高め）")
-        
-        # 2. Config
-        try:
-            config.load_config()
-            results.append("✅ 設定ファイル: OK")
-        except Exception as e:
-            results.append(f"❌ 設定ファイル: {e}")
-        
-        # Stats
-        results.append(f"✅ VC自動切断: {'ON' if config.vc_block_enabled else 'OFF'}")
-        results.append(f"✅ 対象ユーザー: {len(config.BLOCKED_USERS)}人")
-        results.append(f"✅ 対象VC: {len(config.TARGET_VC_IDS)}個")
-        results.append(f"✅ 管理者数: {len(config.ADMIN_IDS)}人")
-        
-        # Helper Test
-        try:
-            owner = self.bot.get_user(config.OWNER_ID) or await self.bot.fetch_user(config.OWNER_ID)
-            await owner.send(embed=discord.Embed(title="🔧 DMテスト", description="System Check", color=discord.Color.blue()))
-            results.append("✅ DM送信: 成功")
-        except Exception as e:
-            results.append(f"❌ DM送信: {e}")
-
-        # Unit Tests
-        test_results = run_unit_tests()
-        results.extend(test_results)
-
-        # Permissions
-        if interaction.guild and interaction.guild.me:
-            if interaction.guild.me.guild_permissions.move_members:
-                results.append("✅ VC切断権限: あり")
-            else:
-                results.append("❌ VC切断権限: なし")
-
-        embed = discord.Embed(title="🔧 システムチェック結果", description="\n".join(results), color=discord.Color.green())
-        await interaction.followup.send(embed=embed)
+        await interaction.response.defer(ephemeral=True)
+        # 一貫性のために、0時チェックと同じロジックを使用します
+        await self.run_daily_test(interaction.channel)
+        await interaction.followup.send("システムチェックを実行しました。チャンネルのメッセージを確認してください。", ephemeral=True)
 
     @app_commands.command(name="autoping", description="毎日0時の自動pingを設定（オーナーのみ）")
     @app_commands.describe(action="設定するアクション", channel="pingを送信するチャンネル")
@@ -204,7 +252,7 @@ class SystemCog(commands.Cog):
             if config.AUTO_PING_CHANNEL_ID == 0:
                 await interaction.response.send_message("📋 自動ping: 無効", ephemeral=True)
             else:
-                ch_mention = f"<#{config.AUTO_PING_CHANNEL_ID}>" # simple format in case cache missing
+                ch_mention = f"<#{config.AUTO_PING_CHANNEL_ID}>" # キャッシュがない場合のシンプルなフォーマット
                 await interaction.response.send_message(f"📋 自動ping: 有効 - {ch_mention}", ephemeral=True)
 
     # ====== Help Command ======
@@ -218,8 +266,10 @@ class SystemCog(commands.Cog):
         def get_public_page(self):
             embed = discord.Embed(title="📖 ヘルプ - 一般", color=discord.Color.green())
             embed.add_field(name="🏓 /ping", value="応答速度確認", inline=False)
+            embed.add_field(name="💬 /say", value="代理発言", inline=False)
+            embed.add_field(name="🔍 /check", value="プレイヤー照会・ロール付与", inline=False)
             embed.add_field(name="🎮 /playerlist", value="お荷物プレイヤーリスト表示", inline=False)
-            embed.set_footer(text="Page 1/3")
+            embed.set_footer(text="ページ 1/3")
             return embed
         
         def get_admin_page(self):
@@ -229,7 +279,9 @@ class SystemCog(commands.Cog):
              embed.add_field(name="🎙️ /blockvc", value="VC追加/削除", inline=False)
              embed.add_field(name="📋 /list", value="設定一覧", inline=False)
              embed.add_field(name="🎭 /simvc", value="VC切断シミュレーション", inline=False)
-             embed.set_footer(text="Page 2/3")
+             embed.add_field(name="🧹 /clear", value="チャット削除", inline=False)
+             embed.add_field(name="🎮 プレイヤー管理", value="/player_edit, /player_delete\n/scanhistory", inline=False)
+             embed.set_footer(text="ページ 2/3")
              return embed
 
         def get_owner_page(self):
@@ -237,14 +289,11 @@ class SystemCog(commands.Cog):
              embed.add_field(name="👨‍💼 /addadmin /removeadmin", value="管理者管理", inline=False)
              embed.add_field(name="📋 /listadmin", value="管理者一覧", inline=False)
              embed.add_field(name="🚪 /exit", value="管理者モード終了", inline=False)
-             embed.add_field(name="💬 /say", value="代理発言", inline=False)
-             embed.add_field(name="🧹 /clear", value="チャット削除", inline=False)
              embed.add_field(name="✉️ /dm", value="DM送信", inline=False)
              embed.add_field(name="🔧 /test", value="システムチェック", inline=False)
              embed.add_field(name="🔄 /restart", value="ボット再起動", inline=False)
              embed.add_field(name="⏰ /autoping", value="自動ping設定", inline=False)
-             embed.add_field(name="🎮 プレイヤー管理", value="/player_edit, /player_delete\n/scanhistory", inline=False)
-             embed.set_footer(text="Page 3/3")
+             embed.set_footer(text="ページ 3/3")
              return embed
 
         def update_buttons(self):
